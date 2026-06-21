@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($exists) {
             $message = "Create failed: Email already exists.";
         } else {
-            $presetPassword = 'password';
+            $presetPassword = '1234';
             $passwordHash = password_hash($presetPassword, PASSWORD_BCRYPT);
             $stmt = $conn->prepare("INSERT INTO users (name, email, password, phone, role) VALUES (?, ?, ?, ?, ?)");
             $stmt->bind_param("sssss", $name, $email, $passwordHash, $phone, $role);
@@ -61,7 +61,7 @@ $users = $conn->query("SELECT name, email, role, phone, is_active, created_at FR
     <div class="card">
         <h3>➕ Add User</h3>
         <?php if ($message): ?><p><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
-        <p style="margin-bottom:10px;color:#555;">Admin creates accounts only. All new users are assigned the preset password: <strong>password</strong>.</p>
+        <p style="margin-bottom:10px;color:#555;">Admin creates accounts only. All new users are assigned the preset password: <strong>1234</strong>.</p>
         <form method="POST" style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px;">
             <input type="text" name="name" placeholder="Full name" required>
             <input type="email" name="email" placeholder="Email" required>
