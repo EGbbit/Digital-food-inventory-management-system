@@ -139,7 +139,6 @@ $defaultUsers = [
 ];
 
 $findRoleStmt = $conn->prepare("SELECT id FROM users WHERE role = ? ORDER BY id ASC LIMIT 1");
-$updateUserStmt = $conn->prepare("UPDATE users SET name = ?, email = ?, password = ?, phone = ?, is_active = 1 WHERE id = ?");
 $insertUserStmt = $conn->prepare("INSERT INTO users (name, email, password, phone, role, is_active) VALUES (?, ?, ?, ?, ?, 1)");
 
 foreach ($defaultUsers as $user) {
@@ -152,18 +151,13 @@ foreach ($defaultUsers as $user) {
     $findRoleStmt->execute();
     $roleResult = $findRoleStmt->get_result()->fetch_assoc();
 
-    if ($roleResult) {
-        $userId = (int)$roleResult['id'];
-        $updateUserStmt->bind_param('ssssi', $name, $email, $defaultHash, $phone, $userId);
-        $updateUserStmt->execute();
-    } else {
+    if (!$roleResult) {
         $insertUserStmt->bind_param('sssss', $name, $email, $defaultHash, $phone, $role);
         $insertUserStmt->execute();
     }
 }
 
 $findRoleStmt->close();
-$updateUserStmt->close();
 $insertUserStmt->close();
 
 if ($isFreshInstall) {
