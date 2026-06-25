@@ -134,15 +134,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $selling_price = (float)($_POST['selling_price'] ?? 0);
         $is_available = isset($_POST['is_available']) ? 1 : 0;
 
+        if ($category === '') {
+            $category = 'General';
+        }
+
         if ($name !== '' && $selling_price > 0) {
-            $stmt = $conn->prepare('INSERT INTO menu_items (name, category, selling_price, is_available) VALUES (?, ?, ?, ?)');
-            $stmt->bind_param('ssdi', $name, $category, $selling_price, $is_available);
-            if ($stmt->execute()) {
-                $message = 'Menu item added.';
+            $findStmt = $conn->prepare('SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND LOWER(COALESCE(category, "")) = LOWER(?) LIMIT 1');
+            $findStmt->bind_param('ss', $name, $category);
+            $findStmt->execute();
+            $existing = $findStmt->get_result()->fetch_assoc();
+            $findStmt->close();
+
+            if ($existing) {
+                $existingId = (int)$existing['id'];
+                $updateStmt = $conn->prepare('UPDATE menu_items SET selling_price = ?, is_available = ? WHERE id = ?');
+                $updateStmt->bind_param('dii', $selling_price, $is_available, $existingId);
+                if ($updateStmt->execute()) {
+                    $message = 'Menu item updated and reflected for all users.';
+                } else {
+                    $message = 'Failed to update menu item: ' . $updateStmt->error;
+                }
+                $updateStmt->close();
             } else {
-                $message = 'Failed to add menu item: ' . $stmt->error;
+                $stmt = $conn->prepare('INSERT INTO menu_items (name, category, selling_price, is_available) VALUES (?, ?, ?, ?)');
+                $stmt->bind_param('ssdi', $name, $category, $selling_price, $is_available);
+                if ($stmt->execute()) {
+                    $message = 'Menu item added and reflected for all users.';
+                } else {
+                    $message = 'Failed to add menu item: ' . $stmt->error;
+                }
+                $stmt->close();
             }
-            $stmt->close();
         } else {
             $message = 'Please provide a valid menu name and price.';
         }

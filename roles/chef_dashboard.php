@@ -87,16 +87,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $alertId = (int)($_POST['alert_id'] ?? 0);
     $orderId = (int)($_POST['order_id'] ?? 0);
     $statusTarget = (string)($_POST['status_target'] ?? '');
-    $allowed = ['pending', 'served'];
+    $allowed = ['pending', 'preparing', 'served'];
 
-    if ($alertId > 0 && $orderId > 0 && in_array($statusTarget, $allowed, true)) {
+    if ($orderId > 0 && in_array($statusTarget, $allowed, true)) {
       $statusStmt = $conn->prepare('UPDATE orders SET status = ? WHERE id = ?');
       $statusStmt->bind_param('si', $statusTarget, $orderId);
       $statusStmt->execute();
 
-      $markStmt = $conn->prepare('UPDATE order_alerts SET alert_status = "seen" WHERE id = ?');
-      $markStmt->bind_param('i', $alertId);
-      $markStmt->execute();
+      if ($alertId > 0) {
+        $markStmt = $conn->prepare('UPDATE order_alerts SET alert_status = "seen" WHERE id = ?');
+        $markStmt->bind_param('i', $alertId);
+        $markStmt->execute();
+      }
+
+      // If action came from the active ticket queue, clear any new alert tied to this order.
+      $markByOrderStmt = $conn->prepare('UPDATE order_alerts SET alert_status = "seen" WHERE order_id = ? AND alert_status = "new"');
+      $markByOrderStmt->bind_param('i', $orderId);
+      $markByOrderStmt->execute();
+
+      $message = 'Order status updated to ' . $statusTarget . '.';
     }
   }
 }
@@ -107,6 +116,7 @@ $pending_orders = (int)$conn->query("SELECT COUNT(*) AS c FROM orders WHERE stat
 $low_stock_items = (int)$conn->query("SELECT COUNT(*) AS c FROM ingredients WHERE current_stock <= reorder_level")->fetch_assoc()['c'];
 
 $tickets = $conn->query("SELECT
+  o.id,
   o.order_number,
   o.table_number,
   o.status,
@@ -519,17 +529,14 @@ $new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_numbe
     </form>
 
     <span class="sidebar__label">Planning</span>
+    <a href="chef_inventory.php" class="nav-item">
+      <span class="nav-item__icon">📦</span> Inventory Console
+    </a>
     <a href="open_menu.php" class="nav-item">
       <span class="nav-item__icon">📋</span> Today's Menu
     </a>
-    <a href="manager_reports.php" class="nav-item">
-      <span class="nav-item__icon">📊</span> Dish Analytics
-    </a>
 
     <span class="sidebar__label">System</span>
-    <a href="waiter_dashboard.php" class="nav-item">
-      <span class="nav-item__icon">🪑</span> Waiter View
-    </a>
     <a href="../auth/logout.php" class="nav-item">
       <span class="nav-item__icon">⎋</span> Sign Out
     </a>
@@ -580,9 +587,10 @@ $new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_numbe
             <form method="POST" style="margin:0;display:flex;gap:6px;">
               <input type="hidden" name="alert_id" value="<?php echo (int)$alert['id']; ?>">
               <input type="hidden" name="order_id" value="<?php echo (int)$alert['order_id']; ?>">
-              <button type="submit" name="set_order_status" value="1" class="btn btn-warning" onclick="this.form.status_target.value='pending';">Set Pending</button>
-              <button type="submit" name="set_order_status" value="1" class="btn btn-success" onclick="this.form.status_target.value='served';">Ready to Serve</button>
-              <input type="hidden" name="status_target" value="pending">
+              <input type="hidden" name="set_order_status" value="1">
+              <button type="submit" name="status_target" value="pending" class="btn btn-warning">Set Pending</button>
+              <button type="submit" name="status_target" value="preparing" class="btn btn-primary">Set Preparing</button>
+              <button type="submit" name="status_target" value="served" class="btn btn-success">Set Served</button>
             </form>
           </div>
         <?php endwhile; ?>
@@ -618,6 +626,15 @@ $new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_numbe
                 <div class="ticket__meta">
                   <div class="ticket__time"><?= date('H:i', strtotime((string)$t['created_at'])) ?></div>
                   <div class="<?= htmlspecialchars($elapsedCls) ?>"><?= (int)$elapsedMins ?> min</div>
+                </div>
+                <div style="grid-column: 1 / -1; display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;">
+                  <form method="POST" style="margin:0; display:flex; gap:6px; flex-wrap:wrap;">
+                    <input type="hidden" name="order_id" value="<?= (int)$t['id'] ?>">
+                    <input type="hidden" name="set_order_status" value="1">
+                    <button type="submit" name="status_target" value="pending" class="btn btn-warning">Set Pending</button>
+                    <button type="submit" name="status_target" value="preparing" class="btn btn-primary">Set Preparing</button>
+                    <button type="submit" name="status_target" value="served" class="btn btn-success">Set Served</button>
+                  </form>
                 </div>
               </div>
             <?php endwhile; ?>

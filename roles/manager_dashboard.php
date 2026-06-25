@@ -7,6 +7,8 @@ if ($conn->connect_error) {
     die("Database connection failed: " . $conn->connect_error);
 }
 
+$manager_message = '';
+
 $conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT NOT NULL,
@@ -110,6 +112,9 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
         <div class="role-welcome">
             <h1> Manager Dashboard</h1>
             <p>Performance, stock risk, and kitchen trends</p>
+            <?php if ($manager_message !== ''): ?>
+                <p style="margin-top:10px;color:#2e7d32;font-weight:600;"><?php echo htmlspecialchars($manager_message); ?></p>
+            <?php endif; ?>
         </div>
 
         <div class="stats-grid">

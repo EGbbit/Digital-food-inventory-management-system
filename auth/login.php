@@ -75,6 +75,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         .btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
         .links { text-align: center; margin-top: 20px; }
         .links a { color: #4facfe; text-decoration: none; font-weight: 500; }
+        .main-dashboard-link { display: inline-block; margin-top: 12px; }
         .error { background: #fee; color: #c33; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; border: 1px solid #fcc; }
         .info { background: #eef7ff; color: #205081; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center; border: 1px solid #c8dfff; }
     </style>
@@ -112,6 +113,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <div class="links">
                 <p>Need access? Contact your admin to create your role account.</p>
                 <p style="margin-top:8px;font-size:13px;color:#666;">Use your admin-assigned email and preset password.</p>
+                <a class="main-dashboard-link" href="../index.php">Back to Main Dashboard</a>
             </div>
         </div>
     </div>

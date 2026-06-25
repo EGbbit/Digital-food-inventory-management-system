@@ -8,122 +8,6 @@ if ($conn->connect_error) {
     die('Database connection failed: ' . $conn->connect_error);
 }
 
-// Keep waiter selection rich by auto-seeding a broad starter catalog when menu variety is low.
-$availableMenuCountRow = $conn->query('SELECT COUNT(*) AS c FROM menu_items WHERE is_available = 1')->fetch_assoc();
-$availableMenuCount = (int)($availableMenuCountRow['c'] ?? 0);
-if ($availableMenuCount < 60) {
-    $starterCatalog = [
-        ['Beef Burger', 'Main', 550.00, 1],
-        ['Chicken Burger', 'Main', 520.00, 1],
-        ['Cheese Burger', 'Main', 580.00, 1],
-        ['Double Beef Burger', 'Main', 690.00, 1],
-        ['Chicken Wrap', 'Main', 480.00, 1],
-        ['Beef Wrap', 'Main', 520.00, 1],
-        ['Falafel Wrap', 'Main', 430.00, 1],
-        ['Grilled Chicken Plate', 'Main', 760.00, 1],
-        ['Grilled Fish Plate', 'Main', 790.00, 1],
-        ['Roast Beef Plate', 'Main', 840.00, 1],
-        ['Vegetable Pasta', 'Main', 620.00, 1],
-        ['Chicken Alfredo Pasta', 'Main', 710.00, 1],
-        ['Beef Bolognese Pasta', 'Main', 740.00, 1],
-        ['Penne Arrabbiata', 'Main', 590.00, 1],
-        ['Mushroom Risotto', 'Main', 680.00, 1],
-        ['Seafood Risotto', 'Main', 840.00, 1],
-        ['Chicken Fried Rice', 'Main', 610.00, 1],
-        ['Beef Fried Rice', 'Main', 640.00, 1],
-        ['Vegetable Fried Rice', 'Main', 560.00, 1],
-        ['Chicken Biryani', 'Main', 720.00, 1],
-        ['Beef Biryani', 'Main', 760.00, 1],
-        ['Vegetable Biryani', 'Main', 630.00, 1],
-        ['Chapati and Stew', 'Main', 450.00, 1],
-        ['Ugali and Beef Stew', 'Main', 520.00, 1],
-        ['Ugali and Chicken Stew', 'Main', 500.00, 1],
-        ['Pilau Beef', 'Main', 610.00, 1],
-        ['Pilau Chicken', 'Main', 590.00, 1],
-        ['Nyama Choma Platter', 'Main', 960.00, 1],
-        ['Tilapia Wet Fry', 'Main', 820.00, 1],
-        ['Fish and Chips', 'Main', 700.00, 1],
-        ['Margherita Pizza', 'Pizza', 740.00, 1],
-        ['Pepperoni Pizza', 'Pizza', 860.00, 1],
-        ['BBQ Chicken Pizza', 'Pizza', 890.00, 1],
-        ['Veggie Pizza', 'Pizza', 780.00, 1],
-        ['Hawaiian Pizza', 'Pizza', 870.00, 1],
-        ['French Fries', 'Side', 250.00, 1],
-        ['Masala Fries', 'Side', 300.00, 1],
-        ['Potato Wedges', 'Side', 320.00, 1],
-        ['Onion Rings', 'Side', 310.00, 1],
-        ['Garlic Bread', 'Side', 280.00, 1],
-        ['Steamed Rice', 'Side', 220.00, 1],
-        ['Saute Vegetables', 'Side', 290.00, 1],
-        ['Coleslaw', 'Side', 180.00, 1],
-        ['Kachumbari', 'Side', 160.00, 1],
-        ['Caesar Salad', 'Starter', 390.00, 1],
-        ['Greek Salad', 'Starter', 370.00, 1],
-        ['Garden Salad', 'Starter', 340.00, 1],
-        ['Chicken Salad', 'Starter', 430.00, 1],
-        ['Tomato Soup', 'Starter', 320.00, 1],
-        ['Pumpkin Soup', 'Starter', 340.00, 1],
-        ['Mushroom Soup', 'Starter', 360.00, 1],
-        ['Chicken Wings', 'Starter', 520.00, 1],
-        ['BBQ Wings', 'Starter', 560.00, 1],
-        ['Samosa Beef', 'Starter', 120.00, 1],
-        ['Samosa Veg', 'Starter', 100.00, 1],
-        ['Spring Rolls', 'Starter', 280.00, 1],
-        ['Mozzarella Sticks', 'Starter', 410.00, 1],
-        ['Fresh Orange Juice', 'Drink', 220.00, 1],
-        ['Fresh Mango Juice', 'Drink', 240.00, 1],
-        ['Passion Juice', 'Drink', 230.00, 1],
-        ['Pineapple Juice', 'Drink', 230.00, 1],
-        ['Iced Tea', 'Drink', 180.00, 1],
-        ['Lemonade', 'Drink', 170.00, 1],
-        ['Milkshake Vanilla', 'Drink', 320.00, 1],
-        ['Milkshake Chocolate', 'Drink', 340.00, 1],
-        ['Milkshake Strawberry', 'Drink', 340.00, 1],
-        ['Soda', 'Drink', 120.00, 1],
-        ['Mineral Water Small', 'Drink', 100.00, 1],
-        ['Mineral Water Large', 'Drink', 160.00, 1],
-        ['Espresso', 'Drink', 180.00, 1],
-        ['Cappuccino', 'Drink', 240.00, 1],
-        ['Latte', 'Drink', 260.00, 1],
-        ['African Tea', 'Drink', 150.00, 1],
-        ['Black Tea', 'Drink', 130.00, 1],
-        ['Chocolate Cake Slice', 'Dessert', 280.00, 1],
-        ['Cheesecake Slice', 'Dessert', 320.00, 1],
-        ['Carrot Cake Slice', 'Dessert', 260.00, 1],
-        ['Fruit Salad', 'Dessert', 300.00, 1],
-        ['Ice Cream Vanilla', 'Dessert', 220.00, 1],
-        ['Ice Cream Chocolate', 'Dessert', 220.00, 1],
-        ['Brownie with Ice Cream', 'Dessert', 360.00, 1],
-        ['Pancakes with Honey', 'Dessert', 340.00, 1],
-        ['Waffles with Syrup', 'Dessert', 360.00, 1]
-    ];
-
-    $existingNames = [];
-    $existingRs = $conn->query('SELECT name FROM menu_items');
-    while ($existingRs && ($row = $existingRs->fetch_assoc())) {
-        $existingNames[strtolower(trim((string)$row['name']))] = true;
-    }
-
-    $insertMenuStmt = $conn->prepare('INSERT INTO menu_items (name, category, selling_price, is_available) VALUES (?, ?, ?, ?)');
-    if ($insertMenuStmt) {
-        foreach ($starterCatalog as $item) {
-            $nameKey = strtolower(trim((string)$item[0]));
-            if (isset($existingNames[$nameKey])) {
-                continue;
-            }
-            $menuName = $item[0];
-            $menuCategory = $item[1];
-            $menuPrice = (float)$item[2];
-            $menuAvailable = (int)$item[3];
-            $insertMenuStmt->bind_param('ssdi', $menuName, $menuCategory, $menuPrice, $menuAvailable);
-            if ($insertMenuStmt->execute()) {
-                $existingNames[$nameKey] = true;
-            }
-        }
-        $insertMenuStmt->close();
-    }
-}
-
 $conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     order_id INT NOT NULL,
@@ -171,7 +55,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $table_number = trim($_POST['table_number'] ?? '');
     $menu_item_id = (int)($_POST['menu_item_id'] ?? 0);
+    $food_item_name = trim((string)($_POST['food_item_name'] ?? ''));
+    $meal_category = trim((string)($_POST['meal_category'] ?? ''));
     $quantity = max(1, (int)($_POST['quantity'] ?? 1));
+
+    if ($menu_item_id <= 0 && $food_item_name !== '') {
+        $lookupSql = 'SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND is_available = 1';
+        if ($meal_category !== '') {
+            $lookupSql .= ' AND category = ?';
+        }
+        $lookupSql .= ' LIMIT 1';
+
+        $lookupStmt = $conn->prepare($lookupSql);
+        if ($lookupStmt) {
+            if ($meal_category !== '') {
+                $lookupStmt->bind_param('ss', $food_item_name, $meal_category);
+            } else {
+                $lookupStmt->bind_param('s', $food_item_name);
+            }
+            $lookupStmt->execute();
+            $lookupRow = $lookupStmt->get_result()->fetch_assoc();
+            if ($lookupRow) {
+                $menu_item_id = (int)$lookupRow['id'];
+            }
+        }
+    }
 
     if ($table_number === '' || $menu_item_id <= 0) {
         $error = 'Not available in menu. Please select an available menu item.';
@@ -289,7 +197,7 @@ $orders = $conn->query("SELECT
                 <option value="Dessert">Dessert</option>
                 <option value="Drink">Drink</option>
             </select>
-            <input id="food-item-input" type="text" list="food-item-list" placeholder="Search food item..." autocomplete="off" required>
+            <input id="food-item-input" type="text" name="food_item_name" list="food-item-list" placeholder="Search food item..." autocomplete="off" required>
             <datalist id="food-item-list">
                 <?php while($m = $menu_items->fetch_assoc()): ?>
                     <option
@@ -369,6 +277,8 @@ $orders = $conn->query("SELECT
                 category: opt.getAttribute('data-category') || '',
                 price: parseFloat(opt.getAttribute('data-price') || '0')
             };
+        }).filter(function (item) {
+            return item.id > 0 && item.name !== '';
         })
         : [];
 
@@ -413,7 +323,7 @@ $orders = $conn->query("SELECT
             return normalize(item.name) === query;
         }) || null;
 
-        if (exact) {
+        if (exact && exact.id > 0) {
             menuItemIdInput.value = String(exact.id);
         } else {
             menuItemIdInput.value = '';
@@ -480,8 +390,8 @@ $orders = $conn->query("SELECT
     if (orderForm) {
         orderForm.addEventListener('submit', function (e) {
             const stats = placeExactItemIfAvailable();
-            const selectedId = menuItemIdInput ? menuItemIdInput.value : '';
-            if (!selectedId) {
+            const selectedId = menuItemIdInput ? parseInt(menuItemIdInput.value || '0', 10) : 0;
+            if (!(selectedId > 0)) {
                 const query = normalize(foodItemInput ? foodItemInput.value : '');
                 if (query !== '' && stats.matches.length === 0) {
                     alert('Not available in menu. This demand has been logged for manager review.');
