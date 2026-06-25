@@ -1,9 +1,10 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id'])) {
-    header("Location: ../auth/login.php");
-    exit();
-}
+require_once __DIR__ . '/../core/auth.php';
+require_role('manager');
+header('Location: ../roles/manager_reports.php');
+exit();
+
+/* Legacy report implementation retained below for reference only. */
 
 $conn = new mysqli("localhost", "root", "1234", "food_inventory");
 if ($conn->connect_error) {

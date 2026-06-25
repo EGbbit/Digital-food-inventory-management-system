@@ -57,7 +57,8 @@ $alerts = $conn->query('SELECT a.message, a.created_at, i.name AS ingredient_nam
     <ul class="admin-nav-links">
         <li><a href="../roles/chef_dashboard.php">Dashboard</a></li>
         <li><a href="../roles/chef_inventory.php" class="active">Inventory Console</a></li>
-        <li><a href="../admin/inventory_reports.php">Reports</a></li>
+        <li><a href="../roles/open_menu.php">Open Food Menu</a></li>
+        <li><a href="../admin/ingredients.php">Ingredients</a></li>
     </ul>
 </nav>
 <div class="container">

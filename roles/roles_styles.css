@@ -17,6 +17,42 @@ body {
     line-height: 1.6;
 }
 
+body.dashboard-photo {
+    min-height: 100vh;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
+
+body.dashboard-photo::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(16, 24, 31, 0.74) 0%, rgba(16, 24, 31, 0.45) 55%, rgba(16, 24, 31, 0.7) 100%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+body.dashboard-photo .navbar,
+body.dashboard-photo .admin-nav,
+body.dashboard-photo .container {
+    position: relative;
+    z-index: 1;
+}
+
+body.dashboard-waiter {
+    background-image: url('../Assets/waiter.jpg');
+}
+
+body.dashboard-chef {
+    background-image: url('../Assets/chef.jpg');
+}
+
+body.dashboard-manager {
+    background-image: url('../Assets/pexels-imin-technology-276315592-12935088.jpg');
+}
+
 /* Navigation Styles - Yellow Theme */
 .navbar {
     background: linear-gradient(135deg, #ffd93d 0%, #ff9a3d 100%);
@@ -180,16 +216,16 @@ body {
     color: white; 
 }
 .role-chef { 
-    background: linear-gradient(135deg, #ffd93d 0%, #ff9a3d 100%);
-    color: #333; 
+    background: linear-gradient(135deg, #7fdc74 0%, #c7f7c1 100%);
+    color: #1f3b1e; 
 }
 .role-manager { 
-    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-    color: white; 
+    background: linear-gradient(135deg, #ffd56a 0%, #fff3ce 100%);
+    color: #5a4109; 
 }
 .role-admin { 
-    background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
-    color: white; 
+    background: linear-gradient(135deg, #ff8f8f 0%, #ffd0d0 100%);
+    color: #612020; 
 }
 
 .status-badge {
@@ -389,6 +425,46 @@ body {
     margin-bottom: 2rem;
 }
 
+.chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 1.15rem;
+    align-items: start;
+}
+
+.chart-card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid #ececec;
+    padding: 1rem;
+    min-height: 260px;
+}
+
+.chart-card h4 {
+    margin-bottom: 0.8rem;
+    color: #ff9a3d;
+}
+
+.chart-wrap {
+    height: 190px;
+}
+
+.chart-card canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.chart-card--wide {
+    grid-column: 1 / -1;
+}
+
+.toolbar {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
 .quick-actions {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -540,6 +616,18 @@ body {
     
     .dashboard-grid {
         grid-template-columns: 1fr;
+    }
+
+    .chart-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .chart-card {
+        min-height: 230px;
+    }
+
+    .chart-wrap {
+        height: 170px;
     }
     
     .form-grid {

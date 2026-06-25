@@ -7,10 +7,30 @@ if ($conn->connect_error) {
     die("Database connection failed: " . $conn->connect_error);
 }
 
+$conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    order_number VARCHAR(50) NOT NULL,
+    table_number VARCHAR(20) NOT NULL,
+    waiter_id INT NOT NULL,
+    alert_status ENUM('new','seen') NOT NULL DEFAULT 'new',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_alert_status (alert_status),
+    INDEX idx_order_id (order_id)
+)");
+
 $total_orders = $conn->query("SELECT COUNT(*) AS c FROM orders")->fetch_assoc()['c'];
 $served_orders = $conn->query("SELECT COUNT(*) AS c FROM orders WHERE status='served'")->fetch_assoc()['c'];
 $total_wastage = $conn->query("SELECT IFNULL(SUM(quantity),0) AS total FROM wastage_logs")->fetch_assoc()['total'];
 $low_stock = $conn->query("SELECT COUNT(*) AS c FROM ingredients WHERE current_stock <= reorder_level")->fetch_assoc()['c'];
+$preparing_orders = (int)$conn->query("SELECT COUNT(*) AS c FROM orders WHERE status = 'preparing'")->fetch_assoc()['c'];
+$new_order_alerts = (int)$conn->query("SELECT COUNT(*) AS c FROM order_alerts WHERE alert_status = 'new'")->fetch_assoc()['c'];
+
+$kitchen_flow_orders = $conn->query("SELECT order_number, table_number, status, created_at
+    FROM orders
+    WHERE status = 'preparing'
+    ORDER BY created_at DESC
+    LIMIT 6");
 
 $top_items = $conn->query("SELECT mi.name, SUM(oi.quantity) AS qty
     FROM order_items oi
@@ -23,6 +43,23 @@ $low_items = $conn->query("SELECT name, current_stock, reorder_level, unit
     FROM ingredients
     WHERE current_stock <= reorder_level
     ORDER BY (current_stock - reorder_level) ASC
+    LIMIT 8");
+
+$conn->query("CREATE TABLE IF NOT EXISTS unavailable_item_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    item_query VARCHAR(120) NOT NULL,
+    request_date DATE NOT NULL,
+    request_count INT NOT NULL DEFAULT 1,
+    last_waiter_id INT NULL,
+    last_requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_item_query_date (item_query, request_date),
+    INDEX idx_request_date (request_date)
+)");
+
+$unavailable_demands = $conn->query("SELECT item_query, request_count
+    FROM unavailable_item_requests
+    WHERE request_date = CURDATE()
+    ORDER BY request_count DESC, item_query ASC
     LIMIT 8");
 
 $conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
@@ -51,7 +88,7 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
     <title>Manager Dashboard - FoodFlow</title>
     <link rel="stylesheet" href="roles_styles.css">
 </head>
-<body>
+<body class="dashboard-photo dashboard-manager">
     <nav class="navbar">
         <div class="navbar-brand">FoodFlow Manager</div>
         <div class="navbar-user">
@@ -65,7 +102,7 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
         <ul class="admin-nav-links">
             <li><a href="manager_dashboard.php" class="active">Dashboard</a></li>
             <li><a href="manager_controls.php">Thresholds & Approvals</a></li>
-            <li><a href="../admin/inventory_reports.php">Reports</a></li>
+            <li><a href="manager_reports.php">Reports</a></li>
         </ul>
     </nav>
 
@@ -126,6 +163,8 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
                 <h3> Predictive Report Snapshot</h3>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                     <a href="manager_controls.php" class="btn btn-primary">Open Report Controls</a>
+                    <a href="open_menu.php" class="btn btn-primary">Open Food Menu</a>
+                    <a href="manager_reports.php" class="btn btn-success">Open Reports & Graphs</a>
                     <a href="manager_controls.php#menu-management" class="btn btn-warning">Go to Menu Controls</a>
                 </div>
                 <?php if ($latestPredictive): ?>
@@ -136,7 +175,59 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
                     <p>No predictive report generated yet. Open Report Controls and click Generate Report.</p>
                 <?php endif; ?>
             </div>
+
+            <div class="card">
+                <h3> Kitchen Coordination (Supervisor View)</h3>
+                <p>Preparing: <strong><?php echo $preparing_orders; ?></strong> | New Order Alerts: <strong><?php echo $new_order_alerts; ?></strong></p>
+                <div class="table-responsive" style="margin-top:10px;">
+                    <table class="data-table">
+                        <thead><tr><th>Order</th><th>Table</th><th>Status</th><th>Created</th></tr></thead>
+                        <tbody>
+                        <?php if ($kitchen_flow_orders && $kitchen_flow_orders->num_rows > 0): ?>
+                            <?php while($ko = $kitchen_flow_orders->fetch_assoc()): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars((string)$ko['order_number']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$ko['table_number']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$ko['status']); ?></td>
+                                    <td><?php echo date('Y-m-d H:i', strtotime((string)$ko['created_at'])); ?></td>
+                                </tr>
+                            <?php endwhile; ?>
+                        <?php else: ?>
+                            <tr><td colspan="4">No preparing kitchen orders.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Unavailable Item Demand (Today)</h3>
+                <?php if ($unavailable_demands && $unavailable_demands->num_rows > 0): ?>
+                    <ul class="order-list">
+                        <?php while($d = $unavailable_demands->fetch_assoc()): ?>
+                            <li class="order-item">
+                                <div class="item-primary"><?php echo htmlspecialchars((string)$d['item_query']); ?></div>
+                                <span class="status-badge">Requests <?php echo (int)$d['request_count']; ?></span>
+                            </li>
+                        <?php endwhile; ?>
+                    </ul>
+                <?php else: ?>
+                    <p>No unavailable item requests logged today.</p>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
+        <script>
+            (function () {
+                const refreshMs = 15000;
+                setInterval(function () {
+                    const active = document.activeElement;
+                    const isEditing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+                    if (!document.hidden && !isEditing) {
+                        window.location.reload();
+                    }
+                }, refreshMs);
+            })();
+        </script>
 </body>
 </html>

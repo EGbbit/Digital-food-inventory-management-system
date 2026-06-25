@@ -13,6 +13,34 @@ body {
     line-height: 1.6;
 }
 
+body.dashboard-photo {
+    min-height: 100vh;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+}
+
+body.dashboard-photo::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(140deg, rgba(27, 29, 38, 0.72), rgba(46, 49, 63, 0.55));
+    pointer-events: none;
+    z-index: 0;
+}
+
+body.dashboard-photo .navbar,
+body.dashboard-photo .admin-nav,
+body.dashboard-photo .container {
+    position: relative;
+    z-index: 1;
+}
+
+body.dashboard-admin {
+    background-image: url('../Assets/pexels-imin-technology-276315592-12935088.jpg');
+}
+
 /* Navigation Styles */
 .navbar {
     background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
@@ -174,12 +202,16 @@ body {
     color: white; 
 }
 .role-chef { 
-    background: linear-gradient(135deg, #ffd93d 0%, #ff9a3d 100%);
-    color: #333; 
+    background: linear-gradient(135deg, #7fdc74 0%, #c7f7c1 100%);
+    color: #1f3b1e; 
+}
+.role-manager {
+    background: linear-gradient(135deg, #ffd56a 0%, #fff3ce 100%);
+    color: #5a4109;
 }
 .role-admin { 
-    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
-    color: white; 
+    background: linear-gradient(135deg, #ff8f8f 0%, #ffd0d0 100%);
+    color: #612020; 
 }
 
 .status-badge {

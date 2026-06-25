@@ -148,6 +148,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if (isset($_POST['load_starter_menu'])) {
+        $starterItems = [
+            ['Beef Burger', 'Main', 550.00, 1],
+            ['Chicken Wrap', 'Main', 480.00, 1],
+            ['Vegetable Pasta', 'Main', 620.00, 1],
+            ['Grilled Fish', 'Main', 760.00, 1],
+            ['French Fries', 'Side', 250.00, 1],
+            ['Caesar Salad', 'Starter', 390.00, 1],
+            ['Tomato Soup', 'Starter', 320.00, 1],
+            ['Fresh Juice', 'Drink', 220.00, 1],
+            ['Iced Tea', 'Drink', 180.00, 1],
+            ['Fruit Salad', 'Dessert', 300.00, 1]
+        ];
+
+        $inserted = 0;
+        foreach ($starterItems as $item) {
+            $check = $conn->prepare('SELECT id FROM menu_items WHERE name = ? LIMIT 1');
+            $check->bind_param('s', $item[0]);
+            $check->execute();
+            $exists = $check->get_result()->fetch_assoc();
+            $check->close();
+
+            if (!$exists) {
+                $ins = $conn->prepare('INSERT INTO menu_items (name, category, selling_price, is_available) VALUES (?, ?, ?, ?)');
+                $ins->bind_param('ssdi', $item[0], $item[1], $item[2], $item[3]);
+                if ($ins->execute()) {
+                    $inserted++;
+                }
+                $ins->close();
+            }
+        }
+        $message = 'Starter menu sync complete. New items added: ' . $inserted . '.';
+    }
+
     if (isset($_POST['delete_menu_item'])) {
         $menu_item_id = (int)($_POST['menu_item_id'] ?? 0);
         if ($menu_item_id > 0) {
@@ -216,7 +250,8 @@ if ($latestRs && $latestRs->num_rows > 0) {
     <ul class="admin-nav-links">
         <li><a href="manager_dashboard.php">Dashboard</a></li>
         <li><a href="manager_controls.php" class="active">Thresholds & Approvals</a></li>
-        <li><a href="../admin/inventory_reports.php">Reports</a></li>
+        <li><a href="open_menu.php">Open Food Menu</a></li>
+        <li><a href="manager_reports.php">Reports</a></li>
     </ul>
 </nav>
 <div class="container">
@@ -248,6 +283,12 @@ if ($latestRs && $latestRs->num_rows > 0) {
 
     <div class="card" style="margin-top:16px;">
         <h3 id="menu-management"> Menu Management</h3>
+        <div class="search-box" style="margin-bottom:10px;">
+            <input id="menu-table-search" type="text" placeholder="Search food item in menu table...">
+        </div>
+        <form method="POST" style="margin-bottom:12px;">
+            <button type="submit" name="load_starter_menu" class="btn btn-success">Load Starter Menu Variety</button>
+        </form>
         <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;align-items:end;">
             <input type="text" name="menu_name" placeholder="Item name" required>
             <input type="text" name="menu_category" placeholder="Category">
@@ -261,7 +302,7 @@ if ($latestRs && $latestRs->num_rows > 0) {
                 <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>
                 <?php while($m = $menu_items->fetch_assoc()): ?>
-                    <tr>
+                    <tr class="menu-row">
                         <td><?php echo htmlspecialchars($m['name']); ?></td>
                         <td><?php echo htmlspecialchars((string)$m['category']); ?></td>
                         <td>Kshs. <?php echo number_format((float)$m['selling_price'], 2); ?></td>
@@ -325,5 +366,16 @@ if ($latestRs && $latestRs->num_rows > 0) {
         </div>
     </div>
 </div>
+<script>
+    const menuTableSearch = document.getElementById('menu-table-search');
+    if (menuTableSearch) {
+        menuTableSearch.addEventListener('input', function () {
+            const q = this.value.trim().toLowerCase();
+            document.querySelectorAll('.menu-row').forEach((row) => {
+                row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+            });
+        });
+    }
+</script>
 </body>
 </html>

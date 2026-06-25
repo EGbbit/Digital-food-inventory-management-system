@@ -26,7 +26,7 @@ $conn->close();
     <title>Admin Dashboard - FoodFlow</title>
     <link rel="stylesheet" href="admin_styles.css">
 </head>
-<body>
+<body class="dashboard-photo dashboard-admin">
     <nav class="navbar">
         <div class="navbar-brand">FoodFlow Admin</div>
         <div class="navbar-user">

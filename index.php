@@ -8,83 +8,151 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FoodFlow | Digital Food Inventory Management System</title>
     <style>
+        :root {
+            --ink: #f3f7ef;
+            --accent: #f0b429;
+            --accent-soft: #f8e3ac;
+            --glass: rgba(10, 24, 29, 0.58);
+            --glass-border: rgba(255, 255, 255, 0.26);
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Trebuchet MS', 'Lucida Sans Unicode', 'Lucida Grande', 'Lucida Sans', Arial, sans-serif;
         }
-        
+
         body {
-            background: #f8f9fa;
-            color: #333;
+            min-height: 100vh;
+            color: var(--ink);
+            background:
+                linear-gradient(120deg, rgba(8, 20, 25, 0.92) 5%, rgba(19, 38, 45, 0.65) 45%, rgba(25, 45, 32, 0.68) 100%),
+                url('Assets/homepage.jpg') center/cover no-repeat fixed;
+            display: flex;
+            flex-direction: column;
         }
-        
+
         .navbar {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            background: rgba(14, 32, 40, 0.7);
             color: white;
             padding: 1rem 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(4px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
         }
-        
+
         .navbar-brand {
-            font-size: 1.5rem;
-            font-weight: bold;
+            font-size: 1.65rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
         }
-        
+
         .navbar-links a {
-            color: white;
-            margin-left: 1.5rem;
+            color: var(--ink);
             text-decoration: none;
-            font-weight: 500;
-            transition: opacity 0.3s ease;
+            font-weight: 700;
+            background: rgba(240, 180, 41, 0.95);
+            padding: 10px 18px;
+            border-radius: 999px;
+            transition: transform 0.25s ease, box-shadow 0.25s ease;
         }
-        
+
         .navbar-links a:hover {
-            opacity: 0.8;
-        }
-        
-        .hero {
-            text-align: center;
-            padding: 4rem 1.5rem;
-            background: white;
-            margin: 2rem auto;
-            border-radius: 15px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-            max-width: 1000px;
-        }
-        
-        .hero h1 {
-            color: #4facfe;
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        .hero p {
-            color: #555;
-            font-size: 1.1rem;
-            margin-bottom: 2rem;
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            color: white;
-            padding: 12px 28px;
-            border: none;
-            border-radius: 10px;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.3s ease;
-        }
-        
-        .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(79, 172, 254, 0.4);
+            box-shadow: 0 8px 20px rgba(240, 180, 41, 0.3);
         }
-        
+
+        .hero {
+            margin: 3rem auto;
+            width: min(1100px, 92%);
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 2.5rem;
+            box-shadow: 0 20px 35px rgba(0, 0, 0, 0.35);
+            animation: liftIn 0.7s ease;
+        }
+
+        .hero h1 {
+            color: var(--accent-soft);
+            font-size: clamp(2rem, 4vw, 3rem);
+            margin-bottom: 0.85rem;
+        }
+
+        .hero p {
+            color: #e4eee2;
+            font-size: 1.08rem;
+            max-width: 700px;
+            line-height: 1.7;
+            margin-bottom: 1.6rem;
+        }
+
+        .access-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(140px, 1fr));
+            gap: 0.9rem;
+        }
+
+        .role-access {
+            text-decoration: none;
+            text-align: center;
+            color: #132322;
+            font-weight: 700;
+            border-radius: 12px;
+            padding: 13px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            transition: transform 0.24s ease, box-shadow 0.24s ease;
+        }
+
+        .role-access:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .access-admin {
+            background: linear-gradient(135deg, #ff8f8f 0%, #ffd0d0 100%);
+        }
+
+        .access-manager {
+            background: linear-gradient(135deg, #ffd56a 0%, #fff3ce 100%);
+        }
+
+        .access-chef {
+            background: linear-gradient(135deg, #b8efb2 0%, #e6ffe1 100%);
+        }
+
+        .access-waiter {
+            background: linear-gradient(135deg, #8cd9ff 0%, #d8f3ff 100%);
+        }
+
+        @keyframes liftIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .navbar {
+                padding: 0.9rem 1rem;
+            }
+
+            .hero {
+                margin-top: 1.5rem;
+                padding: 1.4rem;
+            }
+
+            .access-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -98,8 +166,14 @@
 
     <section class="hero">
         <h1>Welcome to FoodFlow</h1>
-        <p>Track stock in real time, reduce wastage, and keep kitchen operations coordinated across admin, waiter, chef, and manager roles.</p>
-        <a href="auth/login.php" class="btn-primary">Login to Continue</a>
+        <p>Track stock in real time, reduce wastage, and keep kitchen operations coordinated across admin, waiter, chef, and manager teams. Login then proceed to your dashboard.</p>
+
+        <div class="access-grid">
+            <a href="auth/login.php?role=admin" class="role-access access-admin">Admin Access</a>
+            <a href="auth/login.php?role=manager" class="role-access access-manager">Manager Access</a>
+            <a href="auth/login.php?role=chef" class="role-access access-chef">Chef Access</a>
+            <a href="auth/login.php?role=waiter" class="role-access access-waiter">Waiter Access</a>
+        </div>
     </section>
 
 </body>
