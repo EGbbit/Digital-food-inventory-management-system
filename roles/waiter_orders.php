@@ -59,10 +59,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $meal_category = trim((string)($_POST['meal_category'] ?? ''));
     $quantity = max(1, (int)($_POST['quantity'] ?? 1));
 
+    $lookupMatchedMultiple = false;
     if ($menu_item_id <= 0 && $food_item_name !== '') {
         $lookupSql = 'SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND is_available = 1';
         if ($meal_category !== '') {
-            $lookupSql .= ' AND category = ?';
+            $lookupSql .= ' AND LOWER(category) = LOWER(?)';
         }
         $lookupSql .= ' LIMIT 1';
 
@@ -79,10 +80,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $menu_item_id = (int)$lookupRow['id'];
             }
         }
+
+        if ($menu_item_id <= 0) {
+            $fallbackSql = 'SELECT id, name FROM menu_items WHERE is_available = 1 AND LOWER(name) LIKE LOWER(?)';
+            if ($meal_category !== '') {
+                $fallbackSql .= ' AND LOWER(category) = LOWER(?)';
+            }
+            $fallbackSql .= ' ORDER BY name ASC LIMIT 2';
+
+            $fallbackStmt = $conn->prepare($fallbackSql);
+            if ($fallbackStmt) {
+                $likePattern = '%' . $food_item_name . '%';
+                if ($meal_category !== '') {
+                    $fallbackStmt->bind_param('ss', $likePattern, $meal_category);
+                } else {
+                    $fallbackStmt->bind_param('s', $likePattern);
+                }
+                $fallbackStmt->execute();
+                $fallbackRows = $fallbackStmt->get_result();
+                if ($fallbackRows) {
+                    $matches = [];
+                    while ($match = $fallbackRows->fetch_assoc()) {
+                        $matches[] = $match;
+                    }
+                    if (count($matches) === 1) {
+                        $menu_item_id = (int)$matches[0]['id'];
+                    } elseif (count($matches) > 1) {
+                        $lookupMatchedMultiple = true;
+                    }
+                }
+            }
+        }
     }
 
     if ($table_number === '' || $menu_item_id <= 0) {
-        $error = 'Not available in menu. Please select an available menu item.';
+        if ($table_number === '') {
+            $error = 'Table number is required.';
+        } elseif ($lookupMatchedMultiple) {
+            $error = 'Multiple available menu items matched. Please type or choose the full item name.';
+        } else {
+            $error = 'Not available in menu. Please select an available menu item.';
+        }
     } else {
         $conn->begin_transaction();
         try {
@@ -332,6 +370,28 @@ $orders = $conn->query("SELECT
         return { exact, matches };
     }
 
+    function resolveMenuSelectionForSubmit() {
+        const stats = placeExactItemIfAvailable();
+        const query = normalize(foodItemInput ? foodItemInput.value : '');
+        let selectedId = menuItemIdInput ? parseInt(menuItemIdInput.value || '0', 10) : 0;
+
+        if (!(selectedId > 0) && query !== '' && stats.matches.length === 1) {
+            selectedId = stats.matches[0].id;
+            if (menuItemIdInput) {
+                menuItemIdInput.value = String(selectedId);
+            }
+            if (foodItemInput) {
+                foodItemInput.value = stats.matches[0].name;
+            }
+        }
+
+        return {
+            selectedId,
+            query,
+            matches: stats.matches
+        };
+    }
+
     function renderOrderPreview() {
         if (!foodItemInput || !orderQty || !orderPreview) {
             return;
@@ -389,16 +449,17 @@ $orders = $conn->query("SELECT
 
     if (orderForm) {
         orderForm.addEventListener('submit', function (e) {
-            const stats = placeExactItemIfAvailable();
-            const selectedId = menuItemIdInput ? parseInt(menuItemIdInput.value || '0', 10) : 0;
+            const resolution = resolveMenuSelectionForSubmit();
+            const selectedId = resolution.selectedId;
             if (!(selectedId > 0)) {
-                const query = normalize(foodItemInput ? foodItemInput.value : '');
-                if (query !== '' && stats.matches.length === 0) {
+                if (resolution.query !== '' && resolution.matches.length === 0) {
                     alert('Not available in menu. This demand has been logged for manager review.');
-                    if (lastLoggedUnavailableQuery !== query) {
-                        logUnavailableDemand(query);
-                        lastLoggedUnavailableQuery = query;
+                    if (lastLoggedUnavailableQuery !== resolution.query) {
+                        logUnavailableDemand(resolution.query);
+                        lastLoggedUnavailableQuery = resolution.query;
                     }
+                } else if (resolution.query !== '' && resolution.matches.length > 1) {
+                    alert('More than one available menu item matches this search. Please choose the exact item name from suggestions.');
                 } else {
                     alert('Please select an available menu item before creating the order.');
                 }

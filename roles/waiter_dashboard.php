@@ -16,9 +16,9 @@ $waiterId = (int)$_SESSION['user_id'];
 $waiterName = !empty($_SESSION['user_name']) ? (string)$_SESSION['user_name'] : 'Waiter';
 
 $todayOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
-$pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='pending'")->fetch_assoc()['count'];
-$preparingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='preparing'")->fetch_assoc()['count'];
-$servedOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='served'")->fetch_assoc()['count'];
+$pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='pending'")->fetch_assoc()['count'];
+$preparingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='preparing'")->fetch_assoc()['count'];
+$servedOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='served'")->fetch_assoc()['count'];
 
 $recentOrders = $conn->query("SELECT order_number, table_number, status, total_amount, created_at
     FROM orders
@@ -41,6 +41,7 @@ $station = 'Floor Service - Dining';
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="refresh" content="20" />
   <title>Waiter Dashboard - FoodFlow</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">

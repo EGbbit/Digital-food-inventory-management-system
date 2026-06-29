@@ -7,6 +7,27 @@ if ($conn->connect_error) {
     die('Database connection failed: ' . $conn->connect_error);
 }
 
+$conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ingredient_id INT NOT NULL,
+    chef_id INT NOT NULL,
+    observed_stock DECIMAL(10,2) NOT NULL,
+    reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+    expected_expiry_date DATE NULL,
+    shelf_life_days INT NULL,
+    urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
+    comment VARCHAR(300) NOT NULL,
+    is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+    acknowledged_by INT NULL,
+    acknowledged_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_chef_stock_notes_created (created_at),
+    INDEX idx_chef_stock_notes_ack (is_acknowledged),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+    FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
+)");
+
 function output_csv(string $filename, array $headers, array $rows): void
 {
     header('Content-Type: text/csv; charset=utf-8');
@@ -73,6 +94,30 @@ while ($row = $lowRs->fetch_assoc()) {
     $lowRows[] = $row;
 }
 
+$chefNotesRows = [];
+$chefNotesRs = $conn->query("SELECT
+    n.id,
+    i.name AS ingredient_name,
+    i.unit,
+    u.name AS chef_name,
+    n.observed_stock,
+    n.reorder_level_snapshot,
+    n.expected_expiry_date,
+    n.shelf_life_days,
+    n.urgency,
+    n.comment,
+    n.is_acknowledged,
+    n.created_at,
+    DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
+    FROM chef_stock_notes n
+    JOIN ingredients i ON i.id = n.ingredient_id
+    JOIN users u ON u.id = n.chef_id
+    ORDER BY n.created_at DESC
+    LIMIT 25");
+while ($chefNotesRs && $row = $chefNotesRs->fetch_assoc()) {
+    $chefNotesRows[] = $row;
+}
+
 $latestPredictive = null;
 $predictiveRs = $conn->query("SELECT report_label, report_body, generation_mode, generated_at
     FROM predictive_reports
@@ -130,6 +175,27 @@ if (isset($_GET['export'])) {
             ];
         }
         output_csv('manager_predictive_' . $stamp . '.csv', ['Label', 'Mode', 'Generated At', 'Body'], $rows);
+    }
+
+    if ($exportType === 'chef-notes') {
+        $rows = [];
+        foreach ($chefNotesRows as $row) {
+            $rows[] = [
+                $row['ingredient_name'],
+                $row['chef_name'],
+                number_format((float)$row['observed_stock'], 2, '.', ''),
+                number_format((float)$row['reorder_level_snapshot'], 2, '.', ''),
+                $row['unit'],
+                (string)$row['urgency'],
+                ($row['expected_expiry_date'] ?? ''),
+                ($row['shelf_life_days'] ?? ''),
+                ($row['days_to_expiry'] ?? ''),
+                ((int)$row['is_acknowledged'] === 1 ? 'acknowledged' : 'pending'),
+                preg_replace('/\s+/', ' ', (string)$row['comment']),
+                date('Y-m-d H:i', strtotime((string)$row['created_at']))
+            ];
+        }
+        output_csv('manager_chef_stock_notes_' . $stamp . '.csv', ['Ingredient', 'Chef', 'Observed Stock', 'Reorder Snapshot', 'Unit', 'Urgency', 'Expected Expiry', 'Shelf Life Days', 'Days To Expiry', 'Review Status', 'Comment', 'Created At'], $rows);
     }
 }
 
@@ -192,6 +258,7 @@ $topItemValues = array_map(static function ($row) {
             <a href="manager_reports.php?export=monthly" class="btn btn-success">Export Monthly Orders CSV</a>
             <a href="manager_reports.php?export=low-stock" class="btn btn-warning">Export Low-Stock CSV</a>
             <a href="manager_reports.php?export=predictive" class="btn btn-primary">Export Predictive CSV</a>
+            <a href="manager_reports.php?export=chef-notes" class="btn btn-success">Export Chef Stock Notes CSV</a>
         </div>
 
         <div class="stats-grid">
@@ -256,6 +323,51 @@ $topItemValues = array_map(static function ($row) {
         </div>
 
         <div class="card" style="margin-top:16px;">
+            <h3>Chef Low-Stock and Shelf-Life Notes</h3>
+            <p style="margin-bottom:10px;color:#555;">Use this feed to tune reorder thresholds in manager controls and prioritize restock and expiry-risk actions.</p>
+            <?php if (count($chefNotesRows) > 0): ?>
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead><tr><th>Time</th><th>Ingredient</th><th>Chef</th><th>Observed</th><th>Reorder Snapshot</th><th>Urgency</th><th>Shelf-Life</th><th>Comment</th><th>Review</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($chefNotesRows as $row): ?>
+                            <?php
+                                $daysToExpiry = $row['days_to_expiry'];
+                                $shelfLifeText = 'No expiry date';
+                                if (!empty($row['expected_expiry_date'])) {
+                                    if ($daysToExpiry !== null && (int)$daysToExpiry < 0) {
+                                        $shelfLifeText = 'Expired ' . abs((int)$daysToExpiry) . ' day(s) ago';
+                                    } elseif ($daysToExpiry !== null) {
+                                        $shelfLifeText = 'Expires in ' . (int)$daysToExpiry . ' day(s)';
+                                    } else {
+                                        $shelfLifeText = (string)$row['expected_expiry_date'];
+                                    }
+                                }
+                                if (!empty($row['shelf_life_days'])) {
+                                    $shelfLifeText .= ' | Shelf-life ' . (int)$row['shelf_life_days'] . ' day(s)';
+                                }
+                            ?>
+                            <tr>
+                                <td><?php echo date('Y-m-d H:i', strtotime((string)$row['created_at'])); ?></td>
+                                <td><?php echo htmlspecialchars((string)$row['ingredient_name']); ?></td>
+                                <td><?php echo htmlspecialchars((string)$row['chef_name']); ?></td>
+                                <td><?php echo number_format((float)$row['observed_stock'], 2); ?> <?php echo htmlspecialchars((string)$row['unit']); ?></td>
+                                <td><?php echo number_format((float)$row['reorder_level_snapshot'], 2); ?></td>
+                                <td><?php echo htmlspecialchars(strtoupper((string)$row['urgency'])); ?></td>
+                                <td><?php echo htmlspecialchars($shelfLifeText); ?></td>
+                                <td><?php echo htmlspecialchars((string)$row['comment']); ?></td>
+                                <td><?php echo ((int)$row['is_acknowledged'] === 1) ? 'Acknowledged' : 'Pending review'; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <p>No chef stock notes yet.</p>
+            <?php endif; ?>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
             <h3>Latest Predictive Report</h3>
             <?php if ($latestPredictive): ?>
                 <p><strong><?php echo htmlspecialchars((string)$latestPredictive['report_label']); ?></strong> (<?php echo htmlspecialchars((string)$latestPredictive['generation_mode']); ?>)</p>
@@ -268,6 +380,18 @@ $topItemValues = array_map(static function ($row) {
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script>
+        (function () {
+            const refreshMs = 20000;
+            setInterval(function () {
+                const active = document.activeElement;
+                const isEditing = active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName);
+                if (!document.hidden && !isEditing) {
+                    window.location.reload();
+                }
+            }, refreshMs);
+        })();
+    </script>
     <script>
         const monthlyLabels = <?php echo json_encode($monthlyLabels); ?>;
         const monthlyValues = <?php echo json_encode($monthlyValues); ?>;

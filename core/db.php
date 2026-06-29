@@ -118,6 +118,27 @@ $conn->query("CREATE TABLE IF NOT EXISTS alerts (
     FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
 )");
 
+$conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ingredient_id INT NOT NULL,
+    chef_id INT NOT NULL,
+    observed_stock DECIMAL(10,2) NOT NULL,
+    reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+    expected_expiry_date DATE NULL,
+    shelf_life_days INT NULL,
+    urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
+    comment VARCHAR(300) NOT NULL,
+    is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+    acknowledged_by INT NULL,
+    acknowledged_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_chef_stock_notes_created (created_at),
+    INDEX idx_chef_stock_notes_ack (is_acknowledged),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+    FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
+)");
+
 $conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
     id INT AUTO_INCREMENT PRIMARY KEY,
     report_month DATE NOT NULL UNIQUE,

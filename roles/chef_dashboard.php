@@ -35,7 +35,73 @@ $conn->query("CREATE TABLE IF NOT EXISTS alerts (
   FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE
 )");
 
+$conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ingredient_id INT NOT NULL,
+  chef_id INT NOT NULL,
+  observed_stock DECIMAL(10,2) NOT NULL,
+  reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+  expected_expiry_date DATE NULL,
+  shelf_life_days INT NULL,
+  urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
+  comment VARCHAR(300) NOT NULL,
+  is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+  acknowledged_by INT NULL,
+  acknowledged_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_chef_stock_notes_created (created_at),
+  INDEX idx_chef_stock_notes_ack (is_acknowledged),
+  FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+  FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
+)");
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+  if (isset($_POST['submit_stock_note'])) {
+    $chefId = (int)($_SESSION['user_id'] ?? 0);
+    $ingredientId = (int)($_POST['ingredient_id'] ?? 0);
+    $observedStock = (float)($_POST['observed_stock'] ?? 0);
+    $reorderSnapshot = (float)($_POST['reorder_level_snapshot'] ?? 0);
+    $shelfLifeDaysRaw = trim((string)($_POST['shelf_life_days'] ?? ''));
+    $shelfLifeDays = $shelfLifeDaysRaw === '' ? null : (int)$shelfLifeDaysRaw;
+    $expiryDateRaw = trim((string)($_POST['expected_expiry_date'] ?? ''));
+    $expiryDate = $expiryDateRaw === '' ? null : $expiryDateRaw;
+    $urgency = trim((string)($_POST['urgency'] ?? 'watch'));
+    $comment = trim((string)($_POST['chef_comment'] ?? ''));
+
+    if ($ingredientId <= 0 || $comment === '') {
+      $message = 'Ingredient and comment are required for stock note.';
+    } else {
+      $allowedUrgency = ['normal', 'watch', 'urgent'];
+      if (!in_array($urgency, $allowedUrgency, true)) {
+        $urgency = 'watch';
+      }
+
+      if ($shelfLifeDays !== null && $shelfLifeDays < 0) {
+        $shelfLifeDays = 0;
+      }
+
+      if ($expiryDate !== null) {
+        $d = DateTime::createFromFormat('Y-m-d', $expiryDate);
+        if (!$d || $d->format('Y-m-d') !== $expiryDate) {
+          $expiryDate = null;
+        }
+      }
+
+      $comment = substr($comment, 0, 300);
+      $noteStmt = $conn->prepare('INSERT INTO chef_stock_notes (ingredient_id, chef_id, observed_stock, reorder_level_snapshot, expected_expiry_date, shelf_life_days, urgency, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      if ($noteStmt) {
+        $shelfLifeDaysParam = $shelfLifeDays === null ? null : (string)$shelfLifeDays;
+        $noteStmt->bind_param('iiddssss', $ingredientId, $chefId, $observedStock, $reorderSnapshot, $expiryDate, $shelfLifeDaysParam, $urgency, $comment);
+        if ($noteStmt->execute()) {
+          $message = 'Stock note logged and shared with manager reports.';
+        } else {
+          $message = 'Could not save stock note. Please try again.';
+        }
+      }
+    }
+  }
+
   if (isset($_POST['send_low_stock_alerts'])) {
     $lowRows = $conn->query("SELECT id, name, current_stock, reorder_level FROM ingredients WHERE current_stock <= reorder_level");
     $existingStmt = $conn->prepare('SELECT id FROM alerts WHERE ingredient_id = ? AND is_resolved = 0 AND alert_type IN ("low_stock", "out_of_stock") LIMIT 1');
@@ -141,6 +207,30 @@ $new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_numbe
   WHERE alert_status = 'new'
   ORDER BY created_at DESC
   LIMIT 6");
+
+$stock_note_ingredients = $conn->query("SELECT id, name, unit, current_stock, reorder_level
+  FROM ingredients
+  WHERE is_active = 1
+  ORDER BY (CASE WHEN reorder_level > 0 THEN current_stock / reorder_level ELSE 999 END) ASC, name ASC
+  LIMIT 50");
+
+$recent_stock_notes = $conn->query("SELECT
+  n.id,
+  i.name AS ingredient_name,
+  i.unit,
+  n.observed_stock,
+  n.reorder_level_snapshot,
+  n.expected_expiry_date,
+  n.shelf_life_days,
+  n.urgency,
+  n.comment,
+  n.created_at,
+  n.is_acknowledged,
+  DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
+  FROM chef_stock_notes n
+  JOIN ingredients i ON i.id = n.ingredient_id
+  ORDER BY n.created_at DESC
+  LIMIT 8");
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -597,6 +687,69 @@ $new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_numbe
       <?php else: ?>
         <p style="margin:0;">No new order alerts.</p>
       <?php endif; ?>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;">
+      <h3 style="margin-bottom:10px;color:#BDECCB;">Low Stock and Shelf-Life Notes (Chef -> Manager)</h3>
+      <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;align-items:end;">
+        <select name="ingredient_id" required>
+          <option value="">Select ingredient</option>
+          <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
+            <?php while ($ing = $stock_note_ingredients->fetch_assoc()): ?>
+              <option value="<?= (int)$ing['id'] ?>"><?= htmlspecialchars((string)$ing['name']) ?> (stock <?= number_format((float)$ing['current_stock'], 2) ?> / reorder <?= number_format((float)$ing['reorder_level'], 2) ?>)</option>
+            <?php endwhile; ?>
+          <?php endif; ?>
+        </select>
+        <input type="number" step="0.01" min="0" name="observed_stock" placeholder="Observed stock" required>
+        <input type="number" step="0.01" min="0" name="reorder_level_snapshot" placeholder="Reorder level snapshot" required>
+        <select name="urgency" required>
+          <option value="normal">Normal</option>
+          <option value="watch" selected>Watch</option>
+          <option value="urgent">Urgent</option>
+        </select>
+        <input type="number" step="1" min="0" name="shelf_life_days" placeholder="Shelf life (days)">
+        <input type="date" name="expected_expiry_date" placeholder="Expected expiry date">
+        <input type="text" name="chef_comment" maxlength="300" placeholder="Comment for manager (restock, quality, expiry risk)" style="grid-column: span 2;" required>
+        <button type="submit" name="submit_stock_note" value="1" class="btn btn-success">Send Note to Manager</button>
+      </form>
+      <p style="margin-top:8px;color:rgba(250,247,242,0.72);font-size:13px;">Use this to flag low stock, expiry risk, and restock context for manager thresholds and purchasing.</p>
+
+      <div style="margin-top:12px;">
+        <h4 style="margin-bottom:8px;color:#FAF7F2;">Recent Kitchen Stock Notes</h4>
+        <?php if ($recent_stock_notes && $recent_stock_notes->num_rows > 0): ?>
+          <?php while ($note = $recent_stock_notes->fetch_assoc()): ?>
+            <?php
+              $urgencyLabel = strtoupper((string)$note['urgency']);
+              $daysToExpiry = $note['days_to_expiry'];
+              $expiryText = 'No expiry date';
+              if ($note['expected_expiry_date']) {
+                if ($daysToExpiry !== null && (int)$daysToExpiry < 0) {
+                  $expiryText = 'Expired ' . abs((int)$daysToExpiry) . ' day(s) ago';
+                } elseif ($daysToExpiry !== null) {
+                  $expiryText = 'Expires in ' . (int)$daysToExpiry . ' day(s)';
+                } else {
+                  $expiryText = 'Expiry: ' . htmlspecialchars((string)$note['expected_expiry_date']);
+                }
+              }
+            ?>
+            <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+                <strong><?= htmlspecialchars((string)$note['ingredient_name']) ?></strong>
+                <span class="status <?= ((string)$note['urgency'] === 'urgent') ? 'status-cancelled' : (((string)$note['urgency'] === 'watch') ? 'status-pending' : 'status-served') ?>"><?= htmlspecialchars($urgencyLabel) ?></span>
+              </div>
+              <div style="font-size:13px;color:rgba(250,247,242,0.78);margin-top:4px;">
+                Stock <?= number_format((float)$note['observed_stock'], 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> | Reorder <?= number_format((float)$note['reorder_level_snapshot'], 2) ?> | <?= $expiryText ?>
+              </div>
+              <div style="font-size:13px;color:rgba(250,247,242,0.86);margin-top:4px;"><?= htmlspecialchars((string)$note['comment']) ?></div>
+              <div style="font-size:12px;color:rgba(250,247,242,0.52);margin-top:3px;">
+                <?= date('Y-m-d H:i', strtotime((string)$note['created_at'])) ?> | <?= ((int)$note['is_acknowledged'] === 1) ? 'Acknowledged by manager' : 'Waiting manager review' ?>
+              </div>
+            </div>
+          <?php endwhile; ?>
+        <?php else: ?>
+          <p style="margin:0;">No stock notes yet.</p>
+        <?php endif; ?>
+      </div>
     </div>
 
     <div class="two-col">
