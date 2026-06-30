@@ -170,6 +170,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    if (isset($_POST['add_ingredient'])) {
+        $ingredientName = trim((string)($_POST['ingredient_name'] ?? ''));
+        $ingredientCategory = trim((string)($_POST['ingredient_category'] ?? ''));
+        $ingredientUnit = trim((string)($_POST['ingredient_unit'] ?? ''));
+        $ingredientStock = (float)($_POST['ingredient_stock'] ?? 0);
+        $ingredientReorder = (float)($_POST['ingredient_reorder'] ?? 0);
+        $ingredientCost = (float)($_POST['ingredient_unit_cost'] ?? 0);
+        $ingredientActive = isset($_POST['ingredient_is_active']) ? 1 : 0;
+
+        if ($ingredientName === '' || $ingredientUnit === '' || $ingredientStock < 0 || $ingredientReorder < 0 || $ingredientCost < 0) {
+            $message = 'Please provide valid ingredient name, unit and non-negative values.';
+        } else {
+            if ($ingredientCategory === '') {
+                $ingredientCategory = 'General';
+            }
+
+            $dupStmt = $conn->prepare('SELECT id FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1');
+            $dupStmt->bind_param('s', $ingredientName);
+            $dupStmt->execute();
+            $dupRow = $dupStmt->get_result()->fetch_assoc();
+            $dupStmt->close();
+
+            if ($dupRow) {
+                $message = 'Ingredient already exists. Update its threshold below or edit through ingredient controls.';
+            } else {
+                $addIngredientStmt = $conn->prepare('INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                if ($addIngredientStmt) {
+                    $addIngredientStmt->bind_param('sssdddi', $ingredientName, $ingredientCategory, $ingredientUnit, $ingredientStock, $ingredientReorder, $ingredientCost, $ingredientActive);
+                    if ($addIngredientStmt->execute()) {
+                        $message = 'Ingredient added successfully and is now available to chef and stock flows.';
+                    } else {
+                        $message = 'Failed to add ingredient: ' . $addIngredientStmt->error;
+                    }
+                    $addIngredientStmt->close();
+                }
+            }
+        }
+    }
+
     if (isset($_POST['load_starter_menu'])) {
         $starterItems = [
             ['Beef Burger', 'Main', 550.00, 1],
@@ -242,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$ingredients = $conn->query('SELECT id, name, unit, current_stock, reorder_level FROM ingredients ORDER BY name');
+$ingredients = $conn->query('SELECT id, name, category, unit, current_stock, reorder_level, unit_cost FROM ingredients ORDER BY name');
 $alerts = $conn->query('SELECT a.id, a.alert_type, a.message, a.created_at, i.name AS ingredient_name FROM alerts a JOIN ingredients i ON a.ingredient_id=i.id WHERE a.is_resolved=0 ORDER BY a.created_at DESC');
 $menu_items = $conn->query('SELECT id, name, category, selling_price, is_available, created_at FROM menu_items ORDER BY name');
 
@@ -261,9 +300,9 @@ if ($latestRs && $latestRs->num_rows > 0) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Manager Controls - FoodFlow</title>
-    <link rel="stylesheet" href="../admin/admin_styles.css">
+    <link rel="stylesheet" href="roles_styles.css">
 </head>
-<body>
+<body class="dashboard-photo dashboard-manager">
 <nav class="navbar">
     <div class="navbar-brand">FoodFlow Manager</div>
     <div class="navbar-user"><span><?php echo htmlspecialchars($_SESSION['user_name']); ?></span><a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a><a href="../auth/logout.php" class="logout-btn">Logout</a></div>
@@ -277,6 +316,21 @@ if ($latestRs && $latestRs->num_rows > 0) {
     </ul>
 </nav>
 <div class="container">
+    <div class="card" style="margin-bottom:16px;">
+        <h3>🧪 Add Ingredient</h3>
+        <p style="margin-bottom:10px;color:#555;">Use this when chefs flag low stock on ingredients that are missing from inventory master data.</p>
+        <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;align-items:end;">
+            <input type="text" name="ingredient_name" placeholder="Ingredient name" required>
+            <input type="text" name="ingredient_category" placeholder="Category (e.g. Dry Goods)">
+            <input type="text" name="ingredient_unit" placeholder="Unit (kg, liters, pcs...)" required>
+            <input type="number" step="0.01" min="0" name="ingredient_stock" placeholder="Current stock" required>
+            <input type="number" step="0.01" min="0" name="ingredient_reorder" placeholder="Reorder level" required>
+            <input type="number" step="0.01" min="0" name="ingredient_unit_cost" placeholder="Unit cost" required>
+            <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="ingredient_is_active" checked> Active</label>
+            <button type="submit" name="add_ingredient" class="btn btn-success">Add Ingredient</button>
+        </form>
+    </div>
+
     <div class="card">
         <h3>⚙️ Threshold Management</h3>
         <?php if ($message): ?><p class="success"><?php echo htmlspecialchars($message); ?></p><?php endif; ?>

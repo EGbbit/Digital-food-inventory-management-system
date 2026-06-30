@@ -1,0 +1,24 @@
+* text=auto
+
+# Keep common source files as text
+*.php text
+*.css text
+*.js text
+*.json text
+*.md text
+*.txt text
+
+# Common binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.jar binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

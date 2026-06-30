@@ -40,6 +40,15 @@ if ($stmt) {
 }
 
 $categories = $conn->query('SELECT DISTINCT category FROM menu_items WHERE category IS NOT NULL AND category <> "" ORDER BY category');
+
+$role = (string)($_SESSION['role'] ?? 'manager');
+$roleClassMap = [
+    'waiter' => 'dashboard-waiter',
+    'chef' => 'dashboard-chef',
+    'manager' => 'dashboard-manager',
+    'admin' => 'dashboard-admin'
+];
+$roleThemeClass = $roleClassMap[$role] ?? 'dashboard-manager';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -49,7 +58,7 @@ $categories = $conn->query('SELECT DISTINCT category FROM menu_items WHERE categ
     <title>Open Food Menu - FoodFlow</title>
     <link rel="stylesheet" href="roles_styles.css">
 </head>
-<body class="dashboard-photo dashboard-manager">
+<body class="dashboard-photo <?php echo htmlspecialchars($roleThemeClass); ?>">
 <nav class="navbar">
     <div class="navbar-brand">FoodFlow Open Menu</div>
     <div class="navbar-user">

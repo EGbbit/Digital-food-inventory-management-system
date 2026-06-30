@@ -41,6 +41,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
   chef_id INT NOT NULL,
   observed_stock DECIMAL(10,2) NOT NULL,
   reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+  suggested_restock_amount DECIMAL(10,2) NULL,
   expected_expiry_date DATE NULL,
   shelf_life_days INT NULL,
   urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
@@ -56,12 +57,19 @@ $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
   FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
 )");
 
+$suggestedCol = $conn->query("SHOW COLUMNS FROM chef_stock_notes LIKE 'suggested_restock_amount'");
+if ($suggestedCol && $suggestedCol->num_rows === 0) {
+  $conn->query("ALTER TABLE chef_stock_notes ADD COLUMN suggested_restock_amount DECIMAL(10,2) NULL AFTER reorder_level_snapshot");
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (isset($_POST['submit_stock_note'])) {
     $chefId = (int)($_SESSION['user_id'] ?? 0);
     $ingredientId = (int)($_POST['ingredient_id'] ?? 0);
     $observedStock = (float)($_POST['observed_stock'] ?? 0);
     $reorderSnapshot = (float)($_POST['reorder_level_snapshot'] ?? 0);
+    $suggestedRestockRaw = trim((string)($_POST['suggested_restock_amount'] ?? ''));
+    $suggestedRestock = $suggestedRestockRaw === '' ? max(0, $reorderSnapshot - $observedStock) : (float)$suggestedRestockRaw;
     $shelfLifeDaysRaw = trim((string)($_POST['shelf_life_days'] ?? ''));
     $shelfLifeDays = $shelfLifeDaysRaw === '' ? null : (int)$shelfLifeDaysRaw;
     $expiryDateRaw = trim((string)($_POST['expected_expiry_date'] ?? ''));
@@ -81,6 +89,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $shelfLifeDays = 0;
       }
 
+      if ($suggestedRestock < 0) {
+        $suggestedRestock = 0;
+      }
+
       if ($expiryDate !== null) {
         $d = DateTime::createFromFormat('Y-m-d', $expiryDate);
         if (!$d || $d->format('Y-m-d') !== $expiryDate) {
@@ -89,10 +101,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       $comment = substr($comment, 0, 300);
-      $noteStmt = $conn->prepare('INSERT INTO chef_stock_notes (ingredient_id, chef_id, observed_stock, reorder_level_snapshot, expected_expiry_date, shelf_life_days, urgency, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      $noteStmt = $conn->prepare('INSERT INTO chef_stock_notes (ingredient_id, chef_id, observed_stock, reorder_level_snapshot, suggested_restock_amount, expected_expiry_date, shelf_life_days, urgency, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
       if ($noteStmt) {
         $shelfLifeDaysParam = $shelfLifeDays === null ? null : (string)$shelfLifeDays;
-        $noteStmt->bind_param('iiddssss', $ingredientId, $chefId, $observedStock, $reorderSnapshot, $expiryDate, $shelfLifeDaysParam, $urgency, $comment);
+        $noteStmt->bind_param('iidddssss', $ingredientId, $chefId, $observedStock, $reorderSnapshot, $suggestedRestock, $expiryDate, $shelfLifeDaysParam, $urgency, $comment);
         if ($noteStmt->execute()) {
           $message = 'Stock note logged and shared with manager reports.';
         } else {
@@ -202,10 +214,21 @@ $inventory = $conn->query("SELECT name, current_stock, reorder_level
   LIMIT 8");
 
 $new_order_alerts_count = (int)$conn->query("SELECT COUNT(*) AS c FROM order_alerts WHERE alert_status = 'new'")->fetch_assoc()['c'];
-$new_order_alerts = $conn->query("SELECT id, order_id, order_number, table_number, created_at
-  FROM order_alerts
-  WHERE alert_status = 'new'
-  ORDER BY created_at DESC
+$new_order_alerts = $conn->query("SELECT
+  a.id,
+  a.order_id,
+  a.order_number,
+  a.table_number,
+  a.created_at,
+  o.status,
+  IFNULL(GROUP_CONCAT(CONCAT(mi.name, ' x', oi.quantity) ORDER BY mi.name SEPARATOR '|'), '') AS items
+  FROM order_alerts a
+  LEFT JOIN orders o ON o.id = a.order_id
+  LEFT JOIN order_items oi ON oi.order_id = a.order_id
+  LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+  WHERE a.alert_status = 'new'
+  GROUP BY a.id, a.order_id, a.order_number, a.table_number, a.created_at, o.status
+  ORDER BY a.created_at DESC
   LIMIT 6");
 
 $stock_note_ingredients = $conn->query("SELECT id, name, unit, current_stock, reorder_level
@@ -217,18 +240,22 @@ $stock_note_ingredients = $conn->query("SELECT id, name, unit, current_stock, re
 $recent_stock_notes = $conn->query("SELECT
   n.id,
   i.name AS ingredient_name,
+  ack.name AS ack_manager_name,
   i.unit,
   n.observed_stock,
   n.reorder_level_snapshot,
+  n.suggested_restock_amount,
   n.expected_expiry_date,
   n.shelf_life_days,
   n.urgency,
   n.comment,
   n.created_at,
   n.is_acknowledged,
+  n.acknowledged_at,
   DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
   FROM chef_stock_notes n
   JOIN ingredients i ON i.id = n.ingredient_id
+  LEFT JOIN users ack ON ack.id = n.acknowledged_by
   ORDER BY n.created_at DESC
   LIMIT 8");
 ?>
@@ -668,11 +695,22 @@ $recent_stock_notes = $conn->query("SELECT
       <h3 style="margin-bottom:8px;color:#BDECCB;">New Order Alerts (Waiter -> Kitchen): <?= (int)$new_order_alerts_count ?></h3>
       <?php if ($new_order_alerts && $new_order_alerts->num_rows > 0): ?>
         <?php while ($alert = $new_order_alerts->fetch_assoc()): ?>
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);">
+          <?php $alertItems = array_filter(explode('|', (string)$alert['items'])); ?>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);gap:10px;">
             <div>
               <strong><?php echo htmlspecialchars((string)$alert['order_number']); ?></strong>
               <span style="margin-left:6px;">Table <?php echo htmlspecialchars((string)$alert['table_number']); ?></span>
+              <span style="margin-left:6px;padding:1px 8px;border:1px solid rgba(255,255,255,0.18);border-radius:12px;font-size:12px;">
+                <?php echo htmlspecialchars(ucfirst((string)($alert['status'] ?? 'pending'))); ?>
+              </span>
               <span style="margin-left:6px;color:rgba(250,247,242,0.6);"><?php echo date('H:i', strtotime((string)$alert['created_at'])); ?></span>
+              <div style="margin-top:6px;font-size:13px;color:rgba(250,247,242,0.85);">
+                <?php if (count($alertItems) > 0): ?>
+                  <?php echo htmlspecialchars(implode(' | ', $alertItems)); ?>
+                <?php else: ?>
+                  Items not listed yet.
+                <?php endif; ?>
+              </div>
             </div>
             <form method="POST" style="margin:0;display:flex;gap:6px;">
               <input type="hidden" name="alert_id" value="<?php echo (int)$alert['id']; ?>">
@@ -692,16 +730,27 @@ $recent_stock_notes = $conn->query("SELECT
     <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;">
       <h3 style="margin-bottom:10px;color:#BDECCB;">Low Stock and Shelf-Life Notes (Chef -> Manager)</h3>
       <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;align-items:end;">
-        <select name="ingredient_id" required>
+        <select id="stock-note-ingredient" name="ingredient_id" required>
           <option value="">Select ingredient</option>
           <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
             <?php while ($ing = $stock_note_ingredients->fetch_assoc()): ?>
-              <option value="<?= (int)$ing['id'] ?>"><?= htmlspecialchars((string)$ing['name']) ?> (stock <?= number_format((float)$ing['current_stock'], 2) ?> / reorder <?= number_format((float)$ing['reorder_level'], 2) ?>)</option>
+              <option
+                value="<?= (int)$ing['id'] ?>"
+                data-unit="<?= htmlspecialchars((string)$ing['unit']) ?>"
+                data-current="<?= number_format((float)$ing['current_stock'], 2, '.', '') ?>"
+                data-reorder="<?= number_format((float)$ing['reorder_level'], 2, '.', '') ?>"
+              >
+                <?= htmlspecialchars((string)$ing['name']) ?> (stock <?= number_format((float)$ing['current_stock'], 2) ?> <?= htmlspecialchars((string)$ing['unit']) ?> / reorder <?= number_format((float)$ing['reorder_level'], 2) ?>)
+              </option>
             <?php endwhile; ?>
           <?php endif; ?>
         </select>
-        <input type="number" step="0.01" min="0" name="observed_stock" placeholder="Observed stock" required>
-        <input type="number" step="0.01" min="0" name="reorder_level_snapshot" placeholder="Reorder level snapshot" required>
+        <input id="observed-stock" type="number" step="0.01" min="0" name="observed_stock" placeholder="Observed stock" required>
+        <input id="reorder-snapshot" type="number" step="0.01" min="0" name="reorder_level_snapshot" placeholder="Reorder level snapshot" required>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <input id="suggested-restock" type="number" step="0.01" min="0" name="suggested_restock_amount" placeholder="Suggested amount needed">
+          <small id="suggested-restock-hint" style="color:rgba(250,247,242,0.72);">Suggestion updates from observed vs reorder levels.</small>
+        </div>
         <select name="urgency" required>
           <option value="normal">Normal</option>
           <option value="watch" selected>Watch</option>
@@ -738,11 +787,22 @@ $recent_stock_notes = $conn->query("SELECT
                 <span class="status <?= ((string)$note['urgency'] === 'urgent') ? 'status-cancelled' : (((string)$note['urgency'] === 'watch') ? 'status-pending' : 'status-served') ?>"><?= htmlspecialchars($urgencyLabel) ?></span>
               </div>
               <div style="font-size:13px;color:rgba(250,247,242,0.78);margin-top:4px;">
-                Stock <?= number_format((float)$note['observed_stock'], 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> | Reorder <?= number_format((float)$note['reorder_level_snapshot'], 2) ?> | <?= $expiryText ?>
+                Stock <?= number_format((float)$note['observed_stock'], 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
+                Reorder <?= number_format((float)$note['reorder_level_snapshot'], 2) ?> |
+                Suggested restock <?= number_format((float)($note['suggested_restock_amount'] ?? 0), 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
+                <?= $expiryText ?>
               </div>
               <div style="font-size:13px;color:rgba(250,247,242,0.86);margin-top:4px;"><?= htmlspecialchars((string)$note['comment']) ?></div>
               <div style="font-size:12px;color:rgba(250,247,242,0.52);margin-top:3px;">
-                <?= date('Y-m-d H:i', strtotime((string)$note['created_at'])) ?> | <?= ((int)$note['is_acknowledged'] === 1) ? 'Acknowledged by manager' : 'Waiting manager review' ?>
+                <?= date('Y-m-d H:i', strtotime((string)$note['created_at'])) ?> |
+                <?php if ((int)$note['is_acknowledged'] === 1): ?>
+                  Acknowledged by <?= htmlspecialchars((string)($note['ack_manager_name'] ?? 'manager')) ?>
+                  <?php if (!empty($note['acknowledged_at'])): ?>
+                    at <?= date('Y-m-d H:i', strtotime((string)$note['acknowledged_at'])) ?>
+                  <?php endif; ?>
+                <?php else: ?>
+                  Waiting manager review
+                <?php endif; ?>
               </div>
             </div>
           <?php endwhile; ?>
@@ -766,7 +826,15 @@ $recent_stock_notes = $conn->query("SELECT
                 $itemLines = array_filter(explode('|', (string)$t['items']));
               ?>
               <div class="ticket <?= htmlspecialchars($cls) ?>">
-                <div class="ticket__table">T<?= htmlspecialchars((string)$t['table_number']) ?></div>
+                <div class="ticket__table"><?= htmlspecialchars((string)$t['table_number']) ?></div>
+                <div style="grid-column: 2 / 4; display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:4px;">
+                  <div style="font-size:0.76rem; color: rgba(250,247,242,0.58);">
+                    Order <?= htmlspecialchars((string)$t['order_number']) ?>
+                  </div>
+                  <div style="font-size:0.72rem; padding:1px 8px; border-radius:12px; border:1px solid rgba(255,255,255,0.18); color:rgba(250,247,242,0.85);">
+                    <?= htmlspecialchars(strtoupper((string)$t['status'])) ?>
+                  </div>
+                </div>
                 <ul class="ticket__items">
                   <?php if (count($itemLines) > 0): ?>
                     <?php foreach ($itemLines as $line): ?>
@@ -843,6 +911,82 @@ $recent_stock_notes = $conn->query("SELECT
   </main>
 </div>
 <script>
+  (function () {
+    const ingredientSelect = document.getElementById('stock-note-ingredient');
+    const observedInput = document.getElementById('observed-stock');
+    const reorderInput = document.getElementById('reorder-snapshot');
+    const suggestedInput = document.getElementById('suggested-restock');
+    const hint = document.getElementById('suggested-restock-hint');
+
+    function parseNum(value) {
+      const n = parseFloat(value || '0');
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function selectedMeta() {
+      if (!ingredientSelect) {
+        return { unit: 'units', reorder: 0 };
+      }
+      const opt = ingredientSelect.options[ingredientSelect.selectedIndex];
+      return {
+        unit: (opt && opt.dataset && opt.dataset.unit) ? opt.dataset.unit : 'units',
+        reorder: (opt && opt.dataset && opt.dataset.reorder) ? parseNum(opt.dataset.reorder) : 0
+      };
+    }
+
+    function updateSuggestion(force) {
+      if (!suggestedInput || !observedInput || !reorderInput) {
+        return;
+      }
+
+      const meta = selectedMeta();
+      const observed = parseNum(observedInput.value);
+      const reorder = parseNum(reorderInput.value);
+      const suggestion = Math.max(0, reorder - observed);
+
+      if (force || suggestedInput.dataset.manual !== '1') {
+        suggestedInput.value = suggestion.toFixed(2);
+      }
+
+      if (hint) {
+        hint.textContent = 'Suggested amount needed: ' + suggestion.toFixed(2) + ' ' + meta.unit;
+      }
+    }
+
+    if (ingredientSelect) {
+      ingredientSelect.addEventListener('change', function () {
+        const meta = selectedMeta();
+        if (reorderInput && (reorderInput.value === '' || parseNum(reorderInput.value) <= 0)) {
+          reorderInput.value = meta.reorder.toFixed(2);
+        }
+        if (suggestedInput) {
+          suggestedInput.dataset.manual = '0';
+        }
+        updateSuggestion(true);
+      });
+    }
+
+    if (observedInput) {
+      observedInput.addEventListener('input', function () {
+        updateSuggestion(false);
+      });
+    }
+
+    if (reorderInput) {
+      reorderInput.addEventListener('input', function () {
+        updateSuggestion(false);
+      });
+    }
+
+    if (suggestedInput) {
+      suggestedInput.addEventListener('input', function () {
+        suggestedInput.dataset.manual = suggestedInput.value.trim() === '' ? '0' : '1';
+      });
+    }
+
+    updateSuggestion(true);
+  })();
+
   (function () {
     const refreshMs = 15000;
     setInterval(function () {

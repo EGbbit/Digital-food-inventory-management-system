@@ -46,9 +46,9 @@ $alerts = $conn->query('SELECT a.message, a.created_at, i.name AS ingredient_nam
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chef Inventory Console - FoodFlow</title>
-    <link rel="stylesheet" href="../admin/admin_styles.css">
+    <link rel="stylesheet" href="roles_styles.css">
 </head>
-<body>
+<body class="dashboard-photo dashboard-chef">
 <nav class="navbar">
     <div class="navbar-brand">FoodFlow Chef</div>
     <div class="navbar-user"><span><?php echo htmlspecialchars($_SESSION['user_name']); ?></span><a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a><a href="../auth/logout.php" class="logout-btn">Logout</a></div>

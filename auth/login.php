@@ -4,11 +4,6 @@ require_once __DIR__ . '/../core/auth.php';
 
 $error = "";
 $info = "";
-$presetRole = $_GET['role'] ?? '';
-
-if (!in_array($presetRole, ['admin', 'waiter', 'chef', 'manager'], true)) {
-    $presetRole = '';
-}
 
 if (isset($_GET['msg']) && $_GET['msg'] === 'admin_creates_accounts') {
     $info = "Accounts are created by admin. Use the credentials provided to you.";
@@ -22,36 +17,23 @@ if ($conn->connect_error) {
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
-    $selectedRole = $_POST['role'] ?? '';
-    $allowedRoles = ['admin', 'waiter', 'chef', 'manager'];
+    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-    if (!in_array($selectedRole, $allowedRoles, true)) {
-        $error = "Please select a valid role.";
-    }
-
-    if ($error === "") {
-        $stmt = $conn->prepare("SELECT * FROM users WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($result->num_rows === 1) {
-            $user = $result->fetch_assoc();
-            if (password_verify($password, $user['password'])) {
-                if ($user['role'] !== $selectedRole) {
-                    $error = "Selected role does not match this account.";
-                } else {
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_name'] = $user['name'];
-                    $_SESSION['role'] = $user['role'];
-                    redirect_by_role($user['role']);
-                }
-            } else {
-                $error = "Invalid password!";
-            }
+    if ($result->num_rows === 1) {
+        $user = $result->fetch_assoc();
+        if (password_verify($password, $user['password'])) {
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['user_name'] = $user['name'];
+            $_SESSION['role'] = $user['role'];
+            redirect_by_role($user['role']);
         } else {
-            $error = "User not found!";
+            $error = "Invalid password!";
         }
+    } else {
+        $error = "User not found!";
     }
 }
 ?>
@@ -71,7 +53,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         .form-container { padding: 30px; }
         .form-group { margin-bottom: 20px; }
         .form-group label { display: block; margin-bottom: 8px; color: #333; font-weight: 500; }
-        .form-group input, .form-group select { width: 100%; padding: 12px 15px; border: 2px solid #e1e5e9; border-radius: 10px; font-size: 16px; background: #fff; }
+        .form-group input { width: 100%; padding: 12px 15px; border: 2px solid #e1e5e9; border-radius: 10px; font-size: 16px; background: #fff; }
         .btn { width: 100%; padding: 12px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
         .links { text-align: center; margin-top: 20px; }
         .links a { color: #4facfe; text-decoration: none; font-weight: 500; }
@@ -93,16 +75,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 <div class="form-group">
                     <label for="email">Email Address</label>
                     <input type="email" id="email" name="email" required placeholder="Enter your email" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>">
-                </div>
-                <div class="form-group">
-                    <label for="role">Role</label>
-                    <select id="role" name="role" required>
-                        <option value="">Select role</option>
-                        <option value="admin" <?php echo (($_POST['role'] ?? $presetRole) === 'admin') ? 'selected' : ''; ?>>Admin</option>
-                        <option value="waiter" <?php echo (($_POST['role'] ?? $presetRole) === 'waiter') ? 'selected' : ''; ?>>Waiter</option>
-                        <option value="chef" <?php echo (($_POST['role'] ?? $presetRole) === 'chef') ? 'selected' : ''; ?>>Chef</option>
-                        <option value="manager" <?php echo (($_POST['role'] ?? $presetRole) === 'manager') ? 'selected' : ''; ?>>Manager</option>
-                    </select>
                 </div>
                 <div class="form-group">
                     <label for="password">Password</label>

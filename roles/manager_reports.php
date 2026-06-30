@@ -7,6 +7,9 @@ if ($conn->connect_error) {
     die('Database connection failed: ' . $conn->connect_error);
 }
 
+$report_message = '';
+$manager_id = (int)($_SESSION['user_id'] ?? 0);
+
 $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ingredient_id INT NOT NULL,
@@ -27,6 +30,133 @@ $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
     FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
     FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
 )");
+
+$suggestedCol = $conn->query("SHOW COLUMNS FROM chef_stock_notes LIKE 'suggested_restock_amount'");
+if ($suggestedCol && $suggestedCol->num_rows === 0) {
+    $conn->query("ALTER TABLE chef_stock_notes ADD COLUMN suggested_restock_amount DECIMAL(10,2) NULL AFTER reorder_level_snapshot");
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_chef_note_ack'])) {
+    $note_id = (int)($_POST['chef_note_id'] ?? 0);
+    $ack_action = (string)($_POST['ack_action'] ?? '');
+
+    if ($note_id > 0 && in_array($ack_action, ['acknowledge', 'reopen'], true)) {
+        if ($ack_action === 'acknowledge') {
+            $ackStmt = $conn->prepare('UPDATE chef_stock_notes SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW() WHERE id = ?');
+            if ($ackStmt) {
+                $ackStmt->bind_param('ii', $manager_id, $note_id);
+                $ackStmt->execute();
+                $report_message = 'Chef note marked as acknowledged.';
+            }
+        } else {
+            $ackStmt = $conn->prepare('UPDATE chef_stock_notes SET is_acknowledged = 0, acknowledged_by = NULL, acknowledged_at = NULL WHERE id = ?');
+            if ($ackStmt) {
+                $ackStmt->bind_param('i', $note_id);
+                $ackStmt->execute();
+                $report_message = 'Chef note moved back to pending review.';
+            }
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_ingredient_quick'])) {
+    $ingredientName = trim((string)($_POST['ingredient_name'] ?? ''));
+    $ingredientUnit = trim((string)($_POST['ingredient_unit'] ?? ''));
+    $ingredientAddAmount = (float)($_POST['ingredient_add_amount'] ?? 0);
+    $ingredientReorder = (float)($_POST['ingredient_reorder'] ?? 0);
+
+    if ($ingredientName === '' || $ingredientAddAmount <= 0 || $ingredientReorder < 0) {
+        $report_message = 'Please provide ingredient name, amount to add, and a valid reorder level.';
+    } else {
+        $dupStmt = $conn->prepare('SELECT id, unit FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1');
+        if ($dupStmt) {
+            $dupStmt->bind_param('s', $ingredientName);
+            $dupStmt->execute();
+            $exists = $dupStmt->get_result()->fetch_assoc();
+            $dupStmt->close();
+
+            if ($exists) {
+                $ingredientId = (int)$exists['id'];
+                $updateStmt = $conn->prepare('UPDATE ingredients SET current_stock = current_stock + ?, reorder_level = ? WHERE id = ?');
+                if ($updateStmt) {
+                    $updateStmt->bind_param('ddi', $ingredientAddAmount, $ingredientReorder, $ingredientId);
+                    if ($updateStmt->execute()) {
+                        $report_message = 'Ingredient stock updated from chef-note quick actions.';
+                    } else {
+                        $report_message = 'Failed to update ingredient stock.';
+                    }
+                    $updateStmt->close();
+                }
+            } else {
+                if ($ingredientUnit === '') {
+                    $report_message = 'Unit is required when adding a new ingredient.';
+                } else {
+                    $addStmt = $conn->prepare('INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                    if ($addStmt) {
+                        $ingredientCategory = 'General';
+                        $ingredientCost = 0.00;
+                        $ingredientActive = 1;
+                        $addStmt->bind_param('sssdddi', $ingredientName, $ingredientCategory, $ingredientUnit, $ingredientAddAmount, $ingredientReorder, $ingredientCost, $ingredientActive);
+                        if ($addStmt->execute()) {
+                            $report_message = 'Ingredient added successfully from chef-note quick actions.';
+                        } else {
+                            $report_message = 'Failed to add ingredient: ' . $addStmt->error;
+                        }
+                        $addStmt->close();
+                    }
+                }
+            }
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_menu_item_quick'])) {
+    $name = trim((string)($_POST['menu_name'] ?? ''));
+    $category = trim((string)($_POST['menu_category'] ?? ''));
+    $sellingPrice = (float)($_POST['selling_price'] ?? 0);
+    $isAvailable = isset($_POST['is_available']) ? 1 : 0;
+
+    if ($name === '' || $sellingPrice <= 0) {
+        $report_message = 'Please provide a valid food item name and price.';
+    } else {
+        if ($category === '') {
+            $category = 'General';
+        }
+
+        $findStmt = $conn->prepare('SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND LOWER(COALESCE(category, "")) = LOWER(?) LIMIT 1');
+        if ($findStmt) {
+            $findStmt->bind_param('ss', $name, $category);
+            $findStmt->execute();
+            $existing = $findStmt->get_result()->fetch_assoc();
+            $findStmt->close();
+
+            if ($existing) {
+                $existingId = (int)$existing['id'];
+                $updateStmt = $conn->prepare('UPDATE menu_items SET selling_price = ?, is_available = ? WHERE id = ?');
+                if ($updateStmt) {
+                    $updateStmt->bind_param('dii', $sellingPrice, $isAvailable, $existingId);
+                    if ($updateStmt->execute()) {
+                        $report_message = 'Food item already existed; price/status updated from quick actions.';
+                    } else {
+                        $report_message = 'Failed to update existing food item.';
+                    }
+                    $updateStmt->close();
+                }
+            } else {
+                $insertStmt = $conn->prepare('INSERT INTO menu_items (name, category, selling_price, is_available) VALUES (?, ?, ?, ?)');
+                if ($insertStmt) {
+                    $insertStmt->bind_param('ssdi', $name, $category, $sellingPrice, $isAvailable);
+                    if ($insertStmt->execute()) {
+                        $report_message = 'Food item added successfully from chef-note quick actions.';
+                    } else {
+                        $report_message = 'Failed to add food item.';
+                    }
+                    $insertStmt->close();
+                }
+            }
+        }
+    }
+}
 
 function output_csv(string $filename, array $headers, array $rows): void
 {
@@ -100,22 +230,46 @@ $chefNotesRs = $conn->query("SELECT
     i.name AS ingredient_name,
     i.unit,
     u.name AS chef_name,
+    ack.name AS ack_manager_name,
     n.observed_stock,
     n.reorder_level_snapshot,
+    n.suggested_restock_amount,
     n.expected_expiry_date,
     n.shelf_life_days,
     n.urgency,
     n.comment,
     n.is_acknowledged,
+    n.acknowledged_at,
     n.created_at,
     DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
     FROM chef_stock_notes n
     JOIN ingredients i ON i.id = n.ingredient_id
     JOIN users u ON u.id = n.chef_id
+    LEFT JOIN users ack ON ack.id = n.acknowledged_by
     ORDER BY n.created_at DESC
     LIMIT 25");
 while ($chefNotesRs && $row = $chefNotesRs->fetch_assoc()) {
     $chefNotesRows[] = $row;
+}
+
+$chefIngredientHints = [];
+foreach ($chefNotesRows as $noteRow) {
+    $ingredientNameHint = trim((string)($noteRow['ingredient_name'] ?? ''));
+    if ($ingredientNameHint === '') {
+        continue;
+    }
+
+    $key = strtolower($ingredientNameHint);
+    if (isset($chefIngredientHints[$key])) {
+        continue;
+    }
+
+    $chefIngredientHints[$key] = [
+        'name' => $ingredientNameHint,
+        'unit' => (string)($noteRow['unit'] ?? ''),
+        'reorder' => (float)($noteRow['reorder_level_snapshot'] ?? 0),
+        'suggested' => (float)($noteRow['suggested_restock_amount'] ?? 0),
+    ];
 }
 
 $latestPredictive = null;
@@ -185,17 +339,20 @@ if (isset($_GET['export'])) {
                 $row['chef_name'],
                 number_format((float)$row['observed_stock'], 2, '.', ''),
                 number_format((float)$row['reorder_level_snapshot'], 2, '.', ''),
+                number_format((float)($row['suggested_restock_amount'] ?? 0), 2, '.', ''),
                 $row['unit'],
                 (string)$row['urgency'],
                 ($row['expected_expiry_date'] ?? ''),
                 ($row['shelf_life_days'] ?? ''),
                 ($row['days_to_expiry'] ?? ''),
                 ((int)$row['is_acknowledged'] === 1 ? 'acknowledged' : 'pending'),
+                ($row['ack_manager_name'] ?? ''),
+                (!empty($row['acknowledged_at']) ? date('Y-m-d H:i', strtotime((string)$row['acknowledged_at'])) : ''),
                 preg_replace('/\s+/', ' ', (string)$row['comment']),
                 date('Y-m-d H:i', strtotime((string)$row['created_at']))
             ];
         }
-        output_csv('manager_chef_stock_notes_' . $stamp . '.csv', ['Ingredient', 'Chef', 'Observed Stock', 'Reorder Snapshot', 'Unit', 'Urgency', 'Expected Expiry', 'Shelf Life Days', 'Days To Expiry', 'Review Status', 'Comment', 'Created At'], $rows);
+        output_csv('manager_chef_stock_notes_' . $stamp . '.csv', ['Ingredient', 'Chef', 'Observed Stock', 'Reorder Snapshot', 'Suggested Restock', 'Unit', 'Urgency', 'Expected Expiry', 'Shelf Life Days', 'Days To Expiry', 'Review Status', 'Acknowledged By', 'Acknowledged At', 'Comment', 'Created At'], $rows);
     }
 }
 
@@ -248,6 +405,10 @@ $topItemValues = array_map(static function ($row) {
     </nav>
 
     <div class="container">
+        <?php if ($report_message !== ''): ?>
+            <p class="success"><?php echo htmlspecialchars($report_message); ?></p>
+        <?php endif; ?>
+
         <div class="role-welcome">
             <h1>Manager Reporting Center</h1>
             <p>All business reports are managed here with export-ready analytics and visual charts.</p>
@@ -325,10 +486,41 @@ $topItemValues = array_map(static function ($row) {
         <div class="card" style="margin-top:16px;">
             <h3>Chef Low-Stock and Shelf-Life Notes</h3>
             <p style="margin-bottom:10px;color:#555;">Use this feed to tune reorder thresholds in manager controls and prioritize restock and expiry-risk actions.</p>
+
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px;margin-bottom:14px;">
+                <div style="background:#f7fbff;border:1px solid #dce9f7;border-radius:10px;padding:10px;">
+                    <h4 style="margin:0 0 8px 0;color:#2f646e;">Quick Add Ingredient</h4>
+                    <p style="margin:0 0 8px 0;font-size:12px;color:#4f5f69;">Enter ingredient and amount to add. Reorder level and unit auto-reflect from chef notes when available.</p>
+                    <form method="POST" style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;align-items:end;">
+                        <input id="quick-ingredient-name" type="text" name="ingredient_name" placeholder="Ingredient name" list="chef-ingredient-hints" required>
+                        <datalist id="chef-ingredient-hints">
+                            <?php foreach ($chefIngredientHints as $hint): ?>
+                                <option value="<?php echo htmlspecialchars((string)$hint['name']); ?>"></option>
+                            <?php endforeach; ?>
+                        </datalist>
+                        <input id="quick-ingredient-amount" type="number" step="0.01" min="0.01" name="ingredient_add_amount" placeholder="Amount to add" required>
+                        <input id="quick-ingredient-reorder" type="number" step="0.01" min="0" name="ingredient_reorder" placeholder="Reorder level (auto from chef note)" required>
+                        <input id="quick-ingredient-unit" type="text" name="ingredient_unit" placeholder="Unit (auto from chef note)" required>
+                        <button type="submit" name="add_ingredient_quick" class="btn btn-success">Add Ingredient</button>
+                    </form>
+                </div>
+
+                <div style="background:#fdf8ef;border:1px solid #eadcc1;border-radius:10px;padding:10px;">
+                    <h4 style="margin:0 0 8px 0;color:#8a6727;">Quick Add Food Item</h4>
+                    <form method="POST" style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;align-items:end;">
+                        <input type="text" name="menu_name" placeholder="Food item name" required>
+                        <input type="text" name="menu_category" placeholder="Category">
+                        <input type="number" step="0.01" min="0.01" name="selling_price" placeholder="Price (Kshs.)" required>
+                        <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" name="is_available" checked> Available</label>
+                        <button type="submit" name="add_menu_item_quick" class="btn btn-primary" style="grid-column: span 2;">Add Food Item</button>
+                    </form>
+                </div>
+            </div>
+
             <?php if (count($chefNotesRows) > 0): ?>
                 <div class="table-responsive">
                     <table class="data-table">
-                        <thead><tr><th>Time</th><th>Ingredient</th><th>Chef</th><th>Observed</th><th>Reorder Snapshot</th><th>Urgency</th><th>Shelf-Life</th><th>Comment</th><th>Review</th></tr></thead>
+                        <thead><tr><th>Time</th><th>Ingredient</th><th>Chef</th><th>Observed</th><th>Reorder Snapshot</th><th>Suggested Restock</th><th>Urgency</th><th>Shelf-Life</th><th>Comment</th><th>Review</th><th>Action</th></tr></thead>
                         <tbody>
                         <?php foreach ($chefNotesRows as $row): ?>
                             <?php
@@ -353,10 +545,31 @@ $topItemValues = array_map(static function ($row) {
                                 <td><?php echo htmlspecialchars((string)$row['chef_name']); ?></td>
                                 <td><?php echo number_format((float)$row['observed_stock'], 2); ?> <?php echo htmlspecialchars((string)$row['unit']); ?></td>
                                 <td><?php echo number_format((float)$row['reorder_level_snapshot'], 2); ?></td>
+                                <td><?php echo number_format((float)($row['suggested_restock_amount'] ?? 0), 2); ?> <?php echo htmlspecialchars((string)$row['unit']); ?></td>
                                 <td><?php echo htmlspecialchars(strtoupper((string)$row['urgency'])); ?></td>
                                 <td><?php echo htmlspecialchars($shelfLifeText); ?></td>
                                 <td><?php echo htmlspecialchars((string)$row['comment']); ?></td>
-                                <td><?php echo ((int)$row['is_acknowledged'] === 1) ? 'Acknowledged' : 'Pending review'; ?></td>
+                                <td>
+                                    <?php if ((int)$row['is_acknowledged'] === 1): ?>
+                                        Acknowledged by <?php echo htmlspecialchars((string)($row['ack_manager_name'] ?? 'manager')); ?>
+                                        <?php if (!empty($row['acknowledged_at'])): ?>
+                                            <br><span style="font-size:12px;color:#555;">at <?php echo date('Y-m-d H:i', strtotime((string)$row['acknowledged_at'])); ?></span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        Pending review
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <form method="POST" style="margin:0;">
+                                        <input type="hidden" name="chef_note_id" value="<?php echo (int)$row['id']; ?>">
+                                        <input type="hidden" name="toggle_chef_note_ack" value="1">
+                                        <?php if ((int)$row['is_acknowledged'] === 1): ?>
+                                            <button type="submit" name="ack_action" value="reopen" class="btn btn-warning btn-sm">Reopen</button>
+                                        <?php else: ?>
+                                            <button type="submit" name="ack_action" value="acknowledge" class="btn btn-success btn-sm">Acknowledge</button>
+                                        <?php endif; ?>
+                                    </form>
+                                </td>
                             </tr>
                         <?php endforeach; ?>
                         </tbody>
@@ -399,6 +612,7 @@ $topItemValues = array_map(static function ($row) {
         const statusValues = <?php echo json_encode($statusValues); ?>;
         const topItemLabels = <?php echo json_encode($topItemLabels); ?>;
         const topItemValues = <?php echo json_encode($topItemValues); ?>;
+        const chefIngredientHints = <?php echo json_encode($chefIngredientHints, JSON_UNESCAPED_SLASHES); ?>;
 
         new Chart(document.getElementById('monthlyOrdersChart'), {
             type: 'line',
@@ -454,6 +668,49 @@ $topItemValues = array_map(static function ($row) {
                 }
             }
         });
+
+        (function () {
+            const ingredientNameInput = document.getElementById('quick-ingredient-name');
+            const amountInput = document.getElementById('quick-ingredient-amount');
+            const reorderInput = document.getElementById('quick-ingredient-reorder');
+            const unitInput = document.getElementById('quick-ingredient-unit');
+
+            if (!ingredientNameInput || !reorderInput || !unitInput) {
+                return;
+            }
+
+            function normalize(value) {
+                return (value || '').trim().toLowerCase();
+            }
+
+            function applyIngredientHint() {
+                const key = normalize(ingredientNameInput.value);
+                if (!key || !chefIngredientHints || !chefIngredientHints[key]) {
+                    return;
+                }
+
+                const hint = chefIngredientHints[key];
+                if (reorderInput && Number(hint.reorder || 0) >= 0) {
+                    reorderInput.value = Number(hint.reorder || 0).toFixed(2);
+                }
+                if (unitInput && hint.unit) {
+                    unitInput.value = String(hint.unit);
+                }
+                if (amountInput && (!amountInput.value || Number(amountInput.value) <= 0) && Number(hint.suggested || 0) > 0) {
+                    amountInput.value = Number(hint.suggested || 0).toFixed(2);
+                }
+            }
+
+            ingredientNameInput.addEventListener('change', applyIngredientHint);
+            ingredientNameInput.addEventListener('blur', applyIngredientHint);
+            ingredientNameInput.addEventListener('input', function () {
+                if (ingredientNameInput.value.trim().length > 2) {
+                    applyIngredientHint();
+                }
+            });
+
+            applyIngredientHint();
+        })();
     </script>
 </body>
 </html>

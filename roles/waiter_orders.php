@@ -61,19 +61,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $lookupMatchedMultiple = false;
     if ($menu_item_id <= 0 && $food_item_name !== '') {
-        $lookupSql = 'SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND is_available = 1';
-        if ($meal_category !== '') {
-            $lookupSql .= ' AND LOWER(category) = LOWER(?)';
-        }
-        $lookupSql .= ' LIMIT 1';
+        $lookupSql = 'SELECT id FROM menu_items WHERE LOWER(name) = LOWER(?) AND is_available = 1 LIMIT 1';
 
         $lookupStmt = $conn->prepare($lookupSql);
         if ($lookupStmt) {
-            if ($meal_category !== '') {
-                $lookupStmt->bind_param('ss', $food_item_name, $meal_category);
-            } else {
-                $lookupStmt->bind_param('s', $food_item_name);
-            }
+            $lookupStmt->bind_param('s', $food_item_name);
             $lookupStmt->execute();
             $lookupRow = $lookupStmt->get_result()->fetch_assoc();
             if ($lookupRow) {
@@ -82,20 +74,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($menu_item_id <= 0) {
-            $fallbackSql = 'SELECT id, name FROM menu_items WHERE is_available = 1 AND LOWER(name) LIKE LOWER(?)';
-            if ($meal_category !== '') {
-                $fallbackSql .= ' AND LOWER(category) = LOWER(?)';
-            }
-            $fallbackSql .= ' ORDER BY name ASC LIMIT 2';
+            $fallbackSql = 'SELECT id, name FROM menu_items WHERE is_available = 1 AND LOWER(name) LIKE LOWER(?) ORDER BY name ASC LIMIT 2';
 
             $fallbackStmt = $conn->prepare($fallbackSql);
             if ($fallbackStmt) {
                 $likePattern = '%' . $food_item_name . '%';
-                if ($meal_category !== '') {
-                    $fallbackStmt->bind_param('ss', $likePattern, $meal_category);
-                } else {
-                    $fallbackStmt->bind_param('s', $likePattern);
-                }
+                $fallbackStmt->bind_param('s', $likePattern);
                 $fallbackStmt->execute();
                 $fallbackRows = $fallbackStmt->get_result();
                 if ($fallbackRows) {
@@ -201,7 +185,7 @@ $orders = $conn->query("SELECT
     <title>Waiter Orders - FoodFlow</title>
     <link rel="stylesheet" href="roles_styles.css">
 </head>
-<body>
+<body class="dashboard-photo dashboard-waiter">
 <nav class="navbar">
     <div class="navbar-brand">FoodFlow Waiter</div>
     <div class="navbar-user"><span><?php echo htmlspecialchars($_SESSION['user_name']); ?></span><a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a><a href="../auth/logout.php" class="logout-btn">Logout</a></div>
@@ -342,12 +326,10 @@ $orders = $conn->query("SELECT
     }
 
     function getMatchingItemsByQuery(query) {
-        const selectedCategory = normalize(menuCategory ? menuCategory.value : '');
         const q = normalize(query);
         return allMenuItems.filter(function (item) {
-            const categoryMatch = selectedCategory === '' || normalize(item.category) === selectedCategory;
             const queryMatch = q === '' || normalize(item.name).includes(q);
-            return categoryMatch && queryMatch;
+            return queryMatch;
         });
     }
 
@@ -397,10 +379,8 @@ $orders = $conn->query("SELECT
             return;
         }
         const query = normalize(foodItemInput.value);
-        const selectedCategory = normalize(menuCategory ? menuCategory.value : '');
         const matchedItem = allMenuItems.find(function (item) {
-            const categoryMatch = selectedCategory === '' || normalize(item.category) === selectedCategory;
-            return categoryMatch && normalize(item.name) === query;
+            return normalize(item.name) === query;
         });
         const price = matchedItem ? matchedItem.price : 0;
         const qty = Math.max(1, parseInt(orderQty.value || '1', 10));
