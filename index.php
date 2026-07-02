@@ -1,5 +1,21 @@
 <?php
 // index.php - FoodFlow Landing Page
+require_once __DIR__ . '/core/auth.php';
+
+$isLoggedIn = isset($_SESSION['user_id']) && isset($_SESSION['role']);
+$dashboardLink = 'auth/login.php';
+
+if ($isLoggedIn) {
+    if ($_SESSION['role'] === 'admin') {
+        $dashboardLink = 'admin/admin_dashboard.php';
+    } elseif ($_SESSION['role'] === 'manager') {
+        $dashboardLink = 'roles/manager_dashboard.php';
+    } elseif ($_SESSION['role'] === 'waiter') {
+        $dashboardLink = 'roles/waiter_dashboard.php';
+    } else {
+        $dashboardLink = 'roles/chef_dashboard.php';
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -58,6 +74,12 @@
             padding: 10px 18px;
             border-radius: 999px;
             transition: transform 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .navbar-links {
+            display: flex;
+            gap: 0.7rem;
+            align-items: center;
         }
 
         .navbar-links a:hover {
@@ -160,7 +182,12 @@
     <nav class="navbar">
         <div class="navbar-brand">FoodFlow</div>
         <div class="navbar-links">
-            <a href="auth/login.php">Login</a>
+            <?php if ($isLoggedIn): ?>
+                <a href="<?php echo htmlspecialchars($dashboardLink); ?>">My Dashboard</a>
+                <a href="auth/logout.php">Logout</a>
+            <?php else: ?>
+                <a href="auth/login.php">Login</a>
+            <?php endif; ?>
         </div>
     </nav>
 
@@ -169,10 +196,17 @@
         <p>Track stock in real time, reduce wastage, and keep kitchen operations coordinated across admin, waiter, chef, and manager teams. Login then proceed to your dashboard.</p>
 
         <div class="access-grid">
-            <a href="auth/login.php?role=admin" class="role-access access-admin">Admin Access</a>
-            <a href="auth/login.php?role=manager" class="role-access access-manager">Manager Access</a>
-            <a href="auth/login.php?role=chef" class="role-access access-chef">Chef Access</a>
-            <a href="auth/login.php?role=waiter" class="role-access access-waiter">Waiter Access</a>
+            <?php if ($isLoggedIn): ?>
+                <a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="role-access access-admin">Go to Dashboard</a>
+                <a href="auth/logout.php" class="role-access access-manager">Logout</a>
+                <a href="admin/inventory_reports.php" class="role-access access-chef">View Reports</a>
+                <a href="admin/ingredients.php" class="role-access access-waiter">View Ingredients</a>
+            <?php else: ?>
+                <a href="auth/login.php?role=admin" class="role-access access-admin">Admin Access</a>
+                <a href="auth/login.php?role=manager" class="role-access access-manager">Manager Access</a>
+                <a href="auth/login.php?role=chef" class="role-access access-chef">Chef Access</a>
+                <a href="auth/login.php?role=waiter" class="role-access access-waiter">Waiter Access</a>
+            <?php endif; ?>
         </div>
     </section>
 

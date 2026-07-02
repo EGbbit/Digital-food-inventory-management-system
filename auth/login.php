@@ -5,6 +5,10 @@ require_once __DIR__ . '/../core/auth.php';
 $error = "";
 $info = "";
 
+if (isset($_SESSION['user_id']) && isset($_SESSION['role'])) {
+    redirect_by_role((string)$_SESSION['role']);
+}
+
 if (isset($_GET['msg']) && $_GET['msg'] === 'admin_creates_accounts') {
     $info = "Accounts are created by admin. Use the credentials provided to you.";
 }
