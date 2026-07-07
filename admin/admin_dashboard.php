@@ -2,6 +2,14 @@
 require_once __DIR__ . '/../core/auth.php';
 require_role('admin');
 
+$login_success_message = (string)($_SESSION['login_success_message'] ?? '');
+if ($login_success_message === '') {
+    $login_success_message = trim((string)($_GET['login_msg'] ?? ''));
+}
+if ($login_success_message !== '') {
+    unset($_SESSION['login_success_message']);
+}
+
 $servername = "localhost";
 $username = "root";
 $password = "1234";
@@ -41,6 +49,7 @@ $conn->close();
             <li><a href="admin_dashboard.php" class="active">Dashboard</a></li>
             <li><a href="manage_users.php">Manage Users</a></li>
             <li><a href="system_audit.php">System Audit</a></li>
+            <li><a href="backup.php">Backup Center</a></li>
         </ul>
     </nav>
 
@@ -48,6 +57,9 @@ $conn->close();
         <div class="welcome-section">
             <h1>Admin Dashboard</h1>
             <p>User administration and audit oversight</p>
+            <?php if ($login_success_message !== ''): ?>
+                <p class="success" style="margin-top:10px;"><?php echo htmlspecialchars($login_success_message); ?></p>
+            <?php endif; ?>
         </div>
 
         <div class="stats-grid">
@@ -60,6 +72,11 @@ $conn->close();
         <div class="quick-actions">
             <a href="manage_users.php" class="action-btn"> Manage Users</a>
             <a href="system_audit.php" class="action-btn"> Review System Audit</a>
+            <a href="backup.php" class="action-btn"> Perform Backup</a>
+            <form method="POST" action="backup.php" style="margin:0;display:inline-block;">
+                <input type="hidden" name="action" value="download_users_now">
+                <button type="submit" class="action-btn"> User Backup (.sql)</button>
+            </form>
         </div>
     </div>
 </body>

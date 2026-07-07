@@ -8,6 +8,14 @@ if ($conn->connect_error) {
 }
 
 $manager_message = '';
+$manager_id = (int)($_SESSION['user_id'] ?? 0);
+$login_success_message = (string)($_SESSION['login_success_message'] ?? '');
+if ($login_success_message === '') {
+    $login_success_message = trim((string)($_GET['login_msg'] ?? ''));
+}
+if ($login_success_message !== '') {
+    unset($_SESSION['login_success_message']);
+}
 
 $conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -53,14 +61,49 @@ $conn->query("CREATE TABLE IF NOT EXISTS unavailable_item_requests (
     request_date DATE NOT NULL,
     request_count INT NOT NULL DEFAULT 1,
     last_waiter_id INT NULL,
+    is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+    acknowledged_by INT NULL,
+    acknowledged_at TIMESTAMP NULL,
     last_requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uq_item_query_date (item_query, request_date),
     INDEX idx_request_date (request_date)
 )");
 
-$unavailable_demands = $conn->query("SELECT item_query, request_count
+$ackCol = $conn->query("SHOW COLUMNS FROM unavailable_item_requests LIKE 'is_acknowledged'");
+if ($ackCol && $ackCol->num_rows === 0) {
+    $conn->query("ALTER TABLE unavailable_item_requests ADD COLUMN is_acknowledged TINYINT(1) NOT NULL DEFAULT 0 AFTER last_waiter_id");
+}
+
+$ackByCol = $conn->query("SHOW COLUMNS FROM unavailable_item_requests LIKE 'acknowledged_by'");
+if ($ackByCol && $ackByCol->num_rows === 0) {
+    $conn->query("ALTER TABLE unavailable_item_requests ADD COLUMN acknowledged_by INT NULL AFTER is_acknowledged");
+}
+
+$ackAtCol = $conn->query("SHOW COLUMNS FROM unavailable_item_requests LIKE 'acknowledged_at'");
+if ($ackAtCol && $ackAtCol->num_rows === 0) {
+    $conn->query("ALTER TABLE unavailable_item_requests ADD COLUMN acknowledged_at TIMESTAMP NULL AFTER acknowledged_by");
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ack_unavailable_item'])) {
+    $demandId = (int)($_POST['demand_id'] ?? 0);
+    if ($demandId > 0) {
+        $ackDemandStmt = $conn->prepare('UPDATE unavailable_item_requests SET is_acknowledged = 1, acknowledged_by = ?, acknowledged_at = NOW() WHERE id = ?');
+        if ($ackDemandStmt) {
+            $ackDemandStmt->bind_param('ii', $manager_id, $demandId);
+            if ($ackDemandStmt->execute() && $ackDemandStmt->affected_rows > 0) {
+                $manager_message = 'Unavailable item demand acknowledged. It is now removed from active demand list.';
+            } else {
+                $manager_message = 'Could not acknowledge the selected unavailable item demand.';
+            }
+            $ackDemandStmt->close();
+        }
+    }
+}
+
+$unavailable_demands = $conn->query("SELECT id, item_query, request_count, last_requested_at
     FROM unavailable_item_requests
     WHERE request_date = CURDATE()
+      AND is_acknowledged = 0
     ORDER BY request_count DESC, item_query ASC
     LIMIT 8");
 
@@ -71,6 +114,28 @@ $conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
     report_body TEXT NOT NULL,
     generation_mode ENUM('auto', 'manual') NOT NULL DEFAULT 'manual',
     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)");
+
+$conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ingredient_id INT NOT NULL,
+    chef_id INT NOT NULL,
+    observed_stock DECIMAL(10,2) NOT NULL,
+    reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+    suggested_restock_amount DECIMAL(10,2) NULL,
+    expected_expiry_date DATE NULL,
+    shelf_life_days INT NULL,
+    urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
+    comment VARCHAR(300) NOT NULL,
+    is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+    acknowledged_by INT NULL,
+    acknowledged_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_chef_stock_notes_created (created_at),
+    INDEX idx_chef_stock_notes_ack (is_acknowledged),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+    FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
 )");
 
 $latestPredictive = null;
@@ -112,6 +177,10 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
         <div class="role-welcome">
             <h1> Manager Dashboard</h1>
             <p>Performance, stock risk, and kitchen trends</p>
+            <p style="margin-top:8px;color:#1f7a8c;font-weight:700;">Login status: You are signed in as <?php echo htmlspecialchars((string)$_SESSION['user_name']); ?> (Manager).</p>
+            <?php if ($login_success_message !== ''): ?>
+                <p style="margin-top:10px;color:#2e7d32;font-weight:600;"><?php echo htmlspecialchars($login_success_message); ?></p>
+            <?php endif; ?>
             <?php if ($manager_message !== ''): ?>
                 <p style="margin-top:10px;color:#2e7d32;font-weight:600;"><?php echo htmlspecialchars($manager_message); ?></p>
             <?php endif; ?>
@@ -211,14 +280,24 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
                     <ul class="order-list">
                         <?php while($d = $unavailable_demands->fetch_assoc()): ?>
                             <li class="order-item">
-                                <div class="item-primary"><?php echo htmlspecialchars((string)$d['item_query']); ?></div>
-                                <span class="status-badge">Requests <?php echo (int)$d['request_count']; ?></span>
+                                <div>
+                                    <div class="item-primary"><?php echo htmlspecialchars((string)$d['item_query']); ?></div>
+                                    <div class="order-details" style="margin-top:4px;">Last requested: <?php echo date('Y-m-d H:i', strtotime((string)$d['last_requested_at'])); ?></div>
+                                </div>
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <span class="status-badge">Requests <?php echo (int)$d['request_count']; ?></span>
+                                    <form method="POST" style="margin:0;">
+                                        <input type="hidden" name="demand_id" value="<?php echo (int)$d['id']; ?>">
+                                        <button type="submit" name="ack_unavailable_item" class="btn btn-success btn-sm">Acknowledge Added</button>
+                                    </form>
+                                </div>
                             </li>
                         <?php endwhile; ?>
                     </ul>
                 <?php else: ?>
-                    <p>No unavailable item requests logged today.</p>
+                    <p>No active unavailable item demands. Items acknowledged as added are removed from this list.</p>
                 <?php endif; ?>
+                <p style="margin-top:10px;color:#555;">After adding demanded items in Reports page, click <strong>Acknowledge Added</strong> here to clear them from demand.</p>
             </div>
         </div>
     </div>

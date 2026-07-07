@@ -30,6 +30,7 @@ $backup_text = "Daily backups are handled at server level. Suggested policy:\n- 
         <li><a href="admin_dashboard.php">Dashboard</a></li>
         <li><a href="manage_users.php">Manage Users</a></li>
         <li><a href="system_audit.php" class="active">System Audit</a></li>
+        <li><a href="backup.php">Backup Center</a></li>
     </ul>
 </nav>
 <div class="container">
@@ -70,6 +71,9 @@ $backup_text = "Daily backups are handled at server level. Suggested policy:\n- 
     <div class="card" style="margin-top:16px;">
         <h3>💾 Backup Policy Note</h3>
         <pre style="white-space:pre-wrap;margin:0;"><?php echo htmlspecialchars($backup_text); ?></pre>
+        <div style="margin-top:12px;">
+            <a href="backup.php" class="action-btn">Open Backup Center</a>
+        </div>
     </div>
 </div>
 </body>

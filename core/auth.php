@@ -23,16 +23,21 @@ function require_role(string $role): void
     }
 }
 
-function redirect_by_role(string $role): void
+function redirect_by_role(string $role, string $message = ''): void
 {
+    $suffix = '';
+    if ($message !== '') {
+        $suffix = '?login_msg=' . rawurlencode($message);
+    }
+
     if ($role === 'admin') {
-        header('Location: ../admin/admin_dashboard.php');
+        header('Location: ../admin/admin_dashboard.php' . $suffix);
     } elseif ($role === 'manager') {
-        header('Location: ../roles/manager_dashboard.php');
+        header('Location: ../roles/manager_dashboard.php' . $suffix);
     } elseif ($role === 'waiter') {
-        header('Location: ../roles/waiter_dashboard.php');
+        header('Location: ../roles/waiter_dashboard.php' . $suffix);
     } else {
-        header('Location: ../roles/chef_dashboard.php');
+        header('Location: ../roles/chef_dashboard.php' . $suffix);
     }
     exit();
 }

@@ -246,6 +246,7 @@ body.dashboard-photo .card,
 body.dashboard-photo .stat-card,
 body.dashboard-photo .chart-card {
     background: rgba(255, 255, 255, 0.95);
+    -webkit-backdrop-filter: blur(5px);
     backdrop-filter: blur(5px);
 }
 

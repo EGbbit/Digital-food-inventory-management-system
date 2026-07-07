@@ -20,114 +20,31 @@ $conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 )");
 
+$conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ingredient_id INT NOT NULL,
+    chef_id INT NOT NULL,
+    observed_stock DECIMAL(10,2) NOT NULL,
+    reorder_level_snapshot DECIMAL(10,2) NOT NULL DEFAULT 0,
+    suggested_restock_amount DECIMAL(10,2) NULL,
+    expected_expiry_date DATE NULL,
+    shelf_life_days INT NULL,
+    urgency ENUM('normal', 'watch', 'urgent') NOT NULL DEFAULT 'watch',
+    comment VARCHAR(300) NOT NULL,
+    is_acknowledged TINYINT(1) NOT NULL DEFAULT 0,
+    acknowledged_by INT NULL,
+    acknowledged_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_chef_stock_notes_created (created_at),
+    INDEX idx_chef_stock_notes_ack (is_acknowledged),
+    FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE CASCADE,
+    FOREIGN KEY (chef_id) REFERENCES users(id) ON DELETE RESTRICT,
+    FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
+)");
+
 $message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (isset($_POST['generate_predictive_report'])) {
-        $monthStart = date('Y-m-01 00:00:00');
-        $nextMonthStart = date('Y-m-01 00:00:00', strtotime('+1 month'));
-        $reportMonthDate = date('Y-m-01');
-        $monthLabel = date('F Y');
-
-        $weeklyItemSales = [];
-        $weeklyStmt = $conn->prepare("SELECT
-            mi.name AS item_name,
-            FLOOR((DAY(o.created_at) - 1) / 7) + 1 AS week_no,
-            SUM(oi.quantity) AS qty
-            FROM orders o
-            JOIN order_items oi ON oi.order_id = o.id
-            JOIN menu_items mi ON mi.id = oi.menu_item_id
-            WHERE o.created_at >= ?
-              AND o.created_at < ?
-              AND o.status <> 'cancelled'
-            GROUP BY mi.name, week_no
-            ORDER BY mi.name, week_no");
-
-        if ($weeklyStmt) {
-            $weeklyStmt->bind_param('ss', $monthStart, $nextMonthStart);
-            $weeklyStmt->execute();
-            $weeklyResult = $weeklyStmt->get_result();
-
-            while ($row = $weeklyResult->fetch_assoc()) {
-                $itemName = (string)$row['item_name'];
-                $weekNo = (int)$row['week_no'];
-                $qty = (float)$row['qty'];
-
-                if (!isset($weeklyItemSales[$itemName])) {
-                    $weeklyItemSales[$itemName] = [];
-                }
-                $weeklyItemSales[$itemName][$weekNo] = $qty;
-            }
-            $weeklyStmt->close();
-        }
-
-        $bestGrowth = null;
-        foreach ($weeklyItemSales as $itemName => $weeks) {
-            for ($week = 2; $week <= 5; $week++) {
-                $prevQty = (float)($weeks[$week - 1] ?? 0);
-                $currQty = (float)($weeks[$week] ?? 0);
-
-                if ($prevQty > 0 && $currQty > $prevQty) {
-                    $factor = $currQty / $prevQty;
-                    if ($bestGrowth === null || $factor > $bestGrowth['factor']) {
-                        $bestGrowth = [
-                            'item' => $itemName,
-                            'from_week' => $week - 1,
-                            'to_week' => $week,
-                            'factor' => $factor,
-                        ];
-                    }
-                }
-            }
-        }
-
-        $analysisLines = [];
-        if ($bestGrowth !== null && $bestGrowth['factor'] >= 1.5) {
-            $multiplier = max(2, min(4, (int)ceil($bestGrowth['factor'])));
-            $analysisLines[] = $bestGrowth['item'] . ' sold ' . number_format($bestGrowth['factor'], 1) . 'x in week ' . (int)$bestGrowth['to_week'] .
-                ' compared to week ' . (int)$bestGrowth['from_week'] . ' of ' . $monthLabel . '.';
-            $analysisLines[] = 'Recommendation: stock up around ' . $multiplier . 'x for this dish ahead of similar demand periods.';
-        } else {
-            $analysisLines[] = 'No major weekly sales spike detected in ' . $monthLabel . '.';
-            $analysisLines[] = 'Recommendation: maintain a 30% buffer on top-selling dishes.';
-        }
-
-        $topStmt = $conn->prepare("SELECT mi.name AS item_name, SUM(oi.quantity) AS total_qty
-            FROM orders o
-            JOIN order_items oi ON oi.order_id = o.id
-            JOIN menu_items mi ON mi.id = oi.menu_item_id
-            WHERE o.created_at >= ?
-              AND o.created_at < ?
-              AND o.status <> 'cancelled'
-            GROUP BY mi.id, mi.name
-            ORDER BY total_qty DESC
-            LIMIT 5");
-
-        if ($topStmt) {
-            $topStmt->bind_param('ss', $monthStart, $nextMonthStart);
-            $topStmt->execute();
-            $topRs = $topStmt->get_result();
-            $analysisLines[] = 'Top dishes this month:';
-            while ($row = $topRs->fetch_assoc()) {
-                $analysisLines[] = '- ' . (string)$row['item_name'] . ': ' . (int)$row['total_qty'] . ' sold';
-            }
-            $topStmt->close();
-        }
-
-        $reportBody = implode("\n", $analysisLines);
-
-        $upsert = $conn->prepare("INSERT INTO predictive_reports (report_month, report_label, report_body, generation_mode)
-            VALUES (?, ?, ?, 'manual')
-            ON DUPLICATE KEY UPDATE report_label = VALUES(report_label), report_body = VALUES(report_body), generation_mode = 'manual', generated_at = CURRENT_TIMESTAMP");
-        $upsert->bind_param('sss', $reportMonthDate, $monthLabel, $reportBody);
-        if ($upsert->execute()) {
-            $message = 'Predictive report generated for ' . $monthLabel . '.';
-        } else {
-            $message = 'Failed to generate predictive report: ' . $upsert->error;
-        }
-        $upsert->close();
-    }
-
     if (isset($_POST['add_menu_item'])) {
         $name = trim($_POST['menu_name'] ?? '');
         $category = trim($_POST['menu_category'] ?? '');
@@ -285,14 +202,6 @@ $ingredients = $conn->query('SELECT id, name, category, unit, current_stock, reo
 $alerts = $conn->query('SELECT a.id, a.alert_type, a.message, a.created_at, i.name AS ingredient_name FROM alerts a JOIN ingredients i ON a.ingredient_id=i.id WHERE a.is_resolved=0 ORDER BY a.created_at DESC');
 $menu_items = $conn->query('SELECT id, name, category, selling_price, is_available, created_at FROM menu_items ORDER BY name');
 
-$latestPredictive = null;
-$latestRs = $conn->query("SELECT report_label, report_body, generation_mode, generated_at
-    FROM predictive_reports
-    ORDER BY generated_at DESC
-    LIMIT 1");
-if ($latestRs && $latestRs->num_rows > 0) {
-    $latestPredictive = $latestRs->fetch_assoc();
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -317,18 +226,9 @@ if ($latestRs && $latestRs->num_rows > 0) {
 </nav>
 <div class="container">
     <div class="card" style="margin-bottom:16px;">
-        <h3>🧪 Add Ingredient</h3>
-        <p style="margin-bottom:10px;color:#555;">Use this when chefs flag low stock on ingredients that are missing from inventory master data.</p>
-        <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;align-items:end;">
-            <input type="text" name="ingredient_name" placeholder="Ingredient name" required>
-            <input type="text" name="ingredient_category" placeholder="Category (e.g. Dry Goods)">
-            <input type="text" name="ingredient_unit" placeholder="Unit (kg, liters, pcs...)" required>
-            <input type="number" step="0.01" min="0" name="ingredient_stock" placeholder="Current stock" required>
-            <input type="number" step="0.01" min="0" name="ingredient_reorder" placeholder="Reorder level" required>
-            <input type="number" step="0.01" min="0" name="ingredient_unit_cost" placeholder="Unit cost" required>
-            <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="ingredient_is_active" checked> Active</label>
-            <button type="submit" name="add_ingredient" class="btn btn-success">Add Ingredient</button>
-        </form>
+        <h3>Inventory Creation Actions</h3>
+        <p style="margin-bottom:10px;color:#555;">Add Ingredient and Add Food Item containers are maintained in Reports only to avoid duplicate entry points.</p>
+        <a href="manager_reports.php" class="btn btn-primary">Open Reports Quick Add</a>
     </div>
 
     <div class="card">
@@ -365,13 +265,7 @@ if ($latestRs && $latestRs->num_rows > 0) {
         <form method="POST" style="margin-bottom:12px;">
             <button type="submit" name="load_starter_menu" class="btn btn-success">Load Starter Menu Variety</button>
         </form>
-        <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;align-items:end;">
-            <input type="text" name="menu_name" placeholder="Item name" required>
-            <input type="text" name="menu_category" placeholder="Category">
-            <input type="number" step="0.01" min="0.01" name="selling_price" placeholder="Price (Kshs.)" required>
-            <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="is_available" checked> Available</label>
-            <button type="submit" name="add_menu_item" class="btn btn-primary">Add Menu Item</button>
-        </form>
+        <p style="margin-bottom:12px;color:#555;">Add Food Item is available in Reports quick actions.</p>
 
         <div class="table-responsive" style="margin-top:14px;">
             <table class="data-table">
@@ -393,27 +287,6 @@ if ($latestRs && $latestRs->num_rows > 0) {
                 <?php endwhile; ?>
                 </tbody>
             </table>
-        </div>
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-        <h3> Predictive Sales Report</h3>
-        <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start;">
-            <div>
-                <form method="POST">
-                    <button type="submit" name="generate_predictive_report" class="btn btn-primary" style="width:100%;">Generate Report</button>
-                </form>
-                <p style="margin-top:8px;color:#666;font-size:13px;">Generates or refreshes the current month analysis.</p>
-            </div>
-            <div style="background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px;min-height:120px;">
-                <?php if ($latestPredictive): ?>
-                    <p><strong><?php echo htmlspecialchars((string)$latestPredictive['report_label']); ?></strong> (<?php echo htmlspecialchars((string)$latestPredictive['generation_mode']); ?>)</p>
-                    <p style="color:#666;font-size:13px;">Generated: <?php echo htmlspecialchars(date('Y-m-d H:i', strtotime((string)$latestPredictive['generated_at']))); ?></p>
-                    <pre style="white-space:pre-wrap;margin-top:8px;"><?php echo htmlspecialchars((string)$latestPredictive['report_body']); ?></pre>
-                <?php else: ?>
-                    <p>No predictive report generated yet. Click Generate Report.</p>
-                <?php endif; ?>
-            </div>
         </div>
     </div>
 

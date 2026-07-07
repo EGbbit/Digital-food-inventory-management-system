@@ -10,6 +10,15 @@ if ($conn->connect_error) {
 $report_message = '';
 $manager_id = (int)($_SESSION['user_id'] ?? 0);
 
+$conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    report_month DATE NOT NULL UNIQUE,
+    report_label VARCHAR(40) NOT NULL,
+    report_body TEXT NOT NULL,
+    generation_mode ENUM('auto', 'manual') NOT NULL DEFAULT 'manual',
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)");
+
 $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ingredient_id INT NOT NULL,
@@ -34,6 +43,213 @@ $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
 $suggestedCol = $conn->query("SHOW COLUMNS FROM chef_stock_notes LIKE 'suggested_restock_amount'");
 if ($suggestedCol && $suggestedCol->num_rows === 0) {
     $conn->query("ALTER TABLE chef_stock_notes ADD COLUMN suggested_restock_amount DECIMAL(10,2) NULL AFTER reorder_level_snapshot");
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_predictive_report'])) {
+    $monthStart = date('Y-m-01 00:00:00');
+    $nextMonthStart = date('Y-m-01 00:00:00', strtotime('+1 month'));
+    $reportMonthDate = date('Y-m-01');
+    $monthLabel = date('F Y');
+
+    $weeklyItemSales = [];
+    $weeklyStmt = $conn->prepare("SELECT
+        mi.name AS item_name,
+        FLOOR((DAY(o.created_at) - 1) / 7) + 1 AS week_no,
+        SUM(oi.quantity) AS qty
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN menu_items mi ON mi.id = oi.menu_item_id
+        WHERE o.created_at >= ?
+          AND o.created_at < ?
+          AND o.status <> 'cancelled'
+        GROUP BY mi.name, week_no
+        ORDER BY mi.name, week_no");
+
+    if ($weeklyStmt) {
+        $weeklyStmt->bind_param('ss', $monthStart, $nextMonthStart);
+        $weeklyStmt->execute();
+        $weeklyResult = $weeklyStmt->get_result();
+
+        while ($row = $weeklyResult->fetch_assoc()) {
+            $itemName = (string)$row['item_name'];
+            $weekNo = (int)$row['week_no'];
+            $qty = (float)$row['qty'];
+
+            if (!isset($weeklyItemSales[$itemName])) {
+                $weeklyItemSales[$itemName] = [];
+            }
+            $weeklyItemSales[$itemName][$weekNo] = $qty;
+        }
+        $weeklyStmt->close();
+    }
+
+    $bestGrowth = null;
+    foreach ($weeklyItemSales as $itemName => $weeks) {
+        for ($week = 2; $week <= 5; $week++) {
+            $prevQty = (float)($weeks[$week - 1] ?? 0);
+            $currQty = (float)($weeks[$week] ?? 0);
+
+            if ($prevQty > 0 && $currQty > $prevQty) {
+                $factor = $currQty / $prevQty;
+                if ($bestGrowth === null || $factor > $bestGrowth['factor']) {
+                    $bestGrowth = [
+                        'item' => $itemName,
+                        'from_week' => $week - 1,
+                        'to_week' => $week,
+                        'factor' => $factor,
+                    ];
+                }
+            }
+        }
+    }
+
+    $analysisLines = [];
+    if ($bestGrowth !== null && $bestGrowth['factor'] >= 1.5) {
+        $multiplier = max(2, min(4, (int)ceil($bestGrowth['factor'])));
+        $analysisLines[] = $bestGrowth['item'] . ' sold ' . number_format($bestGrowth['factor'], 1) . 'x in week ' . (int)$bestGrowth['to_week'] .
+            ' compared to week ' . (int)$bestGrowth['from_week'] . ' of ' . $monthLabel . '.';
+        $analysisLines[] = 'Recommendation: stock up around ' . $multiplier . 'x for this dish ahead of similar demand periods.';
+    } else {
+        $analysisLines[] = 'No major weekly sales spike detected in ' . $monthLabel . '.';
+        $analysisLines[] = 'Recommendation: maintain a 30% buffer on top-selling dishes.';
+    }
+
+    $topStmt = $conn->prepare("SELECT mi.name AS item_name, SUM(oi.quantity) AS total_qty
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN menu_items mi ON mi.id = oi.menu_item_id
+        WHERE o.created_at >= ?
+          AND o.created_at < ?
+          AND o.status <> 'cancelled'
+        GROUP BY mi.id, mi.name
+        ORDER BY total_qty DESC
+        LIMIT 5");
+
+    if ($topStmt) {
+        $topStmt->bind_param('ss', $monthStart, $nextMonthStart);
+        $topStmt->execute();
+        $topRs = $topStmt->get_result();
+        $analysisLines[] = 'Top dishes this month:';
+        while ($row = $topRs->fetch_assoc()) {
+            $analysisLines[] = '- ' . (string)$row['item_name'] . ': ' . (int)$row['total_qty'] . ' sold';
+        }
+        $topStmt->close();
+    }
+
+    $analysisLines[] = '';
+    $analysisLines[] = 'Shelf-life and Expiry Monitoring (from chef notes):';
+
+    $riskyIngredientIds = [];
+    $expiryStmt = $conn->prepare("SELECT
+        n.ingredient_id,
+        i.name AS ingredient_name,
+        n.expected_expiry_date,
+        n.shelf_life_days,
+        n.urgency,
+        n.observed_stock,
+        n.reorder_level_snapshot,
+        n.suggested_restock_amount,
+        n.comment,
+        n.created_at
+        FROM chef_stock_notes n
+        JOIN ingredients i ON i.id = n.ingredient_id
+        WHERE n.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+          AND (
+                (n.expected_expiry_date IS NOT NULL AND n.expected_expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY))
+                OR n.urgency = 'urgent'
+              )
+        ORDER BY
+          CASE
+            WHEN n.expected_expiry_date IS NULL THEN 2
+            WHEN n.expected_expiry_date < CURDATE() THEN 0
+            ELSE 1
+          END,
+          n.expected_expiry_date ASC,
+          n.created_at DESC
+        LIMIT 10");
+
+    if ($expiryStmt) {
+        $expiryStmt->execute();
+        $expiryRs = $expiryStmt->get_result();
+
+        if ($expiryRs && $expiryRs->num_rows > 0) {
+            while ($row = $expiryRs->fetch_assoc()) {
+                $ingredientId = (int)$row['ingredient_id'];
+                $ingredientName = (string)$row['ingredient_name'];
+                $expiryDate = $row['expected_expiry_date'];
+                $urgency = strtoupper((string)$row['urgency']);
+                $observed = number_format((float)$row['observed_stock'], 2);
+                $reorder = number_format((float)$row['reorder_level_snapshot'], 2);
+                $suggested = number_format((float)($row['suggested_restock_amount'] ?? 0), 2);
+                $shortComment = trim((string)$row['comment']);
+                if (strlen($shortComment) > 70) {
+                    $shortComment = substr($shortComment, 0, 70) . '...';
+                }
+
+                $expiryText = 'No expiry date provided';
+                if (!empty($expiryDate)) {
+                    $days = (int)floor((strtotime((string)$expiryDate) - strtotime(date('Y-m-d'))) / 86400);
+                    if ($days < 0) {
+                        $expiryText = 'Expired ' . abs($days) . ' day(s) ago';
+                    } elseif ($days === 0) {
+                        $expiryText = 'Expires today';
+                    } else {
+                        $expiryText = 'Expires in ' . $days . ' day(s)';
+                    }
+                }
+
+                $analysisLines[] = '- ' . $ingredientName
+                    . ' [' . $urgency . '] | ' . $expiryText
+                    . ' | observed ' . $observed
+                    . ' vs reorder ' . $reorder
+                    . ' | suggested restock ' . $suggested
+                    . ($shortComment !== '' ? ' | note: ' . $shortComment : '');
+
+                $riskyIngredientIds[$ingredientId] = true;
+            }
+        } else {
+            $analysisLines[] = '- No near-expiry or urgent chef-note risks detected in the last 30 days.';
+        }
+
+        $expiryStmt->close();
+    } else {
+        $analysisLines[] = '- Could not evaluate shelf-life risk because chef notes are unavailable.';
+    }
+
+    if (count($riskyIngredientIds) > 0) {
+        $analysisLines[] = 'Likely affected food items (based on recipes):';
+        $ids = array_keys($riskyIngredientIds);
+        $idList = implode(',', array_map('intval', $ids));
+        $menuRiskRs = $conn->query("SELECT DISTINCT mi.name AS menu_name
+            FROM recipe_ingredients ri
+            JOIN menu_items mi ON mi.id = ri.menu_item_id
+            WHERE ri.ingredient_id IN (" . $idList . ")
+            ORDER BY mi.name ASC
+            LIMIT 10");
+
+        if ($menuRiskRs && $menuRiskRs->num_rows > 0) {
+            while ($mr = $menuRiskRs->fetch_assoc()) {
+                $analysisLines[] = '- ' . (string)$mr['menu_name'];
+            }
+        } else {
+            $analysisLines[] = '- No recipe-linked menu items found for the current risky ingredients.';
+        }
+    }
+
+    $analysisLines[] = 'Recommendation: prioritize procurement or temporary menu substitution for urgent/near-expiry ingredients.';
+
+    $reportBody = implode("\n", $analysisLines);
+
+    $upsert = $conn->prepare("INSERT INTO predictive_reports (report_month, report_label, report_body, generation_mode)
+        VALUES (?, ?, ?, 'manual')
+        ON DUPLICATE KEY UPDATE report_label = VALUES(report_label), report_body = VALUES(report_body), generation_mode = 'manual', generated_at = CURRENT_TIMESTAMP");
+    $upsert->bind_param('sss', $reportMonthDate, $monthLabel, $reportBody);
+    if ($upsert->execute()) {
+        $report_message = 'Predictive report generated for ' . $monthLabel . '.';
+    } else {
+        $report_message = 'Failed to generate predictive report: ' . $upsert->error;
+    }
+    $upsert->close();
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_chef_note_ack'])) {
@@ -461,6 +677,20 @@ $topItemValues = array_map(static function ($row) {
         </div>
 
         <div class="card" style="margin-top:16px;">
+            <h3>Latest Predictive Report</h3>
+            <form method="POST" style="margin-bottom:10px;">
+                <button type="submit" name="generate_predictive_report" class="btn btn-primary">Generate / Refresh Predictive Report</button>
+            </form>
+            <?php if ($latestPredictive): ?>
+                <p><strong><?php echo htmlspecialchars((string)$latestPredictive['report_label']); ?></strong> (<?php echo htmlspecialchars((string)$latestPredictive['generation_mode']); ?>)</p>
+                <p style="color:#666;font-size:13px;">Generated: <?php echo date('Y-m-d H:i', strtotime((string)$latestPredictive['generated_at'])); ?></p>
+                <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:10px;border-radius:8px;margin-top:8px;"><?php echo htmlspecialchars((string)$latestPredictive['report_body']); ?></pre>
+            <?php else: ?>
+                <p>No predictive report generated yet. Use the button above to generate one.</p>
+            <?php endif; ?>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
             <h3>Low-Stock Detail</h3>
             <?php if (count($lowRows) > 0): ?>
                 <div class="table-responsive">
@@ -580,16 +810,6 @@ $topItemValues = array_map(static function ($row) {
             <?php endif; ?>
         </div>
 
-        <div class="card" style="margin-top:16px;">
-            <h3>Latest Predictive Report</h3>
-            <?php if ($latestPredictive): ?>
-                <p><strong><?php echo htmlspecialchars((string)$latestPredictive['report_label']); ?></strong> (<?php echo htmlspecialchars((string)$latestPredictive['generation_mode']); ?>)</p>
-                <p style="color:#666;font-size:13px;">Generated: <?php echo date('Y-m-d H:i', strtotime((string)$latestPredictive['generated_at'])); ?></p>
-                <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:10px;border-radius:8px;margin-top:8px;"><?php echo htmlspecialchars((string)$latestPredictive['report_body']); ?></pre>
-            <?php else: ?>
-                <p>No predictive report generated yet. Use manager controls to generate one.</p>
-            <?php endif; ?>
-        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>

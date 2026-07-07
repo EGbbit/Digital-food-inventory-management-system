@@ -11,6 +11,13 @@ $page_title = "Chef Dashboard - FoodFlow";
 $chef_name = !empty($_SESSION['user_name']) ? (string)$_SESSION['user_name'] : 'Chef Marco';
 $station = "Head Chef - Main Kitchen";
 $message = '';
+$login_success_message = (string)($_SESSION['login_success_message'] ?? '');
+if ($login_success_message === '') {
+  $login_success_message = trim((string)($_GET['login_msg'] ?? ''));
+}
+if ($login_success_message !== '') {
+  unset($_SESSION['login_success_message']);
+}
 
 $conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -66,6 +73,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (isset($_POST['submit_stock_note'])) {
     $chefId = (int)($_SESSION['user_id'] ?? 0);
     $ingredientId = (int)($_POST['ingredient_id'] ?? 0);
+    $ingredientNameRaw = trim((string)($_POST['ingredient_name'] ?? ''));
+    $ingredientName = substr($ingredientNameRaw, 0, 120);
+    $ingredientUnit = trim((string)($_POST['ingredient_unit'] ?? ''));
     $observedStock = (float)($_POST['observed_stock'] ?? 0);
     $reorderSnapshot = (float)($_POST['reorder_level_snapshot'] ?? 0);
     $suggestedRestockRaw = trim((string)($_POST['suggested_restock_amount'] ?? ''));
@@ -77,12 +87,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $urgency = trim((string)($_POST['urgency'] ?? 'watch'));
     $comment = trim((string)($_POST['chef_comment'] ?? ''));
 
-    if ($ingredientId <= 0 || $comment === '') {
-      $message = 'Ingredient and comment are required for stock note.';
+    if ($comment === '') {
+      $message = 'Comment is required for stock note.';
     } else {
       $allowedUrgency = ['normal', 'watch', 'urgent'];
       if (!in_array($urgency, $allowedUrgency, true)) {
         $urgency = 'watch';
+      }
+
+      if ($ingredientUnit === '') {
+        $ingredientUnit = 'units';
       }
 
       if ($shelfLifeDays !== null && $shelfLifeDays < 0) {
@@ -101,6 +115,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       $comment = substr($comment, 0, 300);
+
+      // Priority: if chef typed an item name, use it (resolve existing or auto-create).
+      // Otherwise use selected ingredient ID from dropdown.
+      if ($ingredientName !== '') {
+        $lookupStmt = $conn->prepare('SELECT id, reorder_level FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1');
+        if ($lookupStmt) {
+          $lookupStmt->bind_param('s', $ingredientName);
+          $lookupStmt->execute();
+          $existingIngredient = $lookupStmt->get_result()->fetch_assoc();
+          $lookupStmt->close();
+
+          if ($existingIngredient) {
+            $ingredientId = (int)$existingIngredient['id'];
+            if ($reorderSnapshot <= 0) {
+              $reorderSnapshot = (float)$existingIngredient['reorder_level'];
+            }
+          } else {
+            $seedStock = max(0, $observedStock);
+            $seedReorder = max(0, $reorderSnapshot);
+            $seedCategory = 'Chef Note';
+            $seedUnitCost = 0.00;
+            $isActive = 1;
+            $createIngredientStmt = $conn->prepare('INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            if ($createIngredientStmt) {
+              $createIngredientStmt->bind_param('sssdddi', $ingredientName, $seedCategory, $ingredientUnit, $seedStock, $seedReorder, $seedUnitCost, $isActive);
+              if ($createIngredientStmt->execute()) {
+                $ingredientId = (int)$conn->insert_id;
+              }
+              $createIngredientStmt->close();
+            }
+          }
+        }
+      }
+
+      if ($ingredientId <= 0) {
+        $message = 'Select an existing ingredient or type a new stock item name.';
+        goto end_stock_note;
+      }
+
       $noteStmt = $conn->prepare('INSERT INTO chef_stock_notes (ingredient_id, chef_id, observed_stock, reorder_level_snapshot, suggested_restock_amount, expected_expiry_date, shelf_life_days, urgency, comment) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
       if ($noteStmt) {
         $shelfLifeDaysParam = $shelfLifeDays === null ? null : (string)$shelfLifeDays;
@@ -112,6 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
       }
     }
+    end_stock_note:
   }
 
   if (isset($_POST['send_low_stock_alerts'])) {
@@ -696,6 +750,9 @@ $recent_stock_notes = $conn->query("SELECT
     <div class="page-header">
       <h1>Kitchen - Live View</h1>
       <p><?= htmlspecialchars($chef_name) ?> - <?= date('l, d F Y - H:i') ?></p>
+      <?php if ($login_success_message !== ''): ?>
+        <p style="margin-top:10px;color:#BDECCB;"><?= htmlspecialchars($login_success_message) ?></p>
+      <?php endif; ?>
       <?php if ($message !== ''): ?>
         <p style="margin-top:10px;color:#BDECCB;"><?= htmlspecialchars($message) ?></p>
       <?php endif; ?>
@@ -763,12 +820,23 @@ $recent_stock_notes = $conn->query("SELECT
     <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;">
       <h3 style="margin-bottom:10px;color:#BDECCB;">Low Stock and Shelf-Life Notes (Chef -> Manager)</h3>
       <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;align-items:end;">
-        <select id="stock-note-ingredient" name="ingredient_id" required>
-          <option value="">Select ingredient</option>
+        <input id="stock-note-ingredient-name" type="text" name="ingredient_name" list="stock-note-ingredient-list" placeholder="Type stock item name (new or existing)">
+        <datalist id="stock-note-ingredient-list">
+          <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
+            <?php mysqli_data_seek($stock_note_ingredients, 0); ?>
+            <?php while ($ingList = $stock_note_ingredients->fetch_assoc()): ?>
+              <option value="<?= htmlspecialchars((string)$ingList['name']) ?>"></option>
+            <?php endwhile; ?>
+            <?php mysqli_data_seek($stock_note_ingredients, 0); ?>
+          <?php endif; ?>
+        </datalist>
+        <select id="stock-note-ingredient" name="ingredient_id">
+          <option value="">Select existing ingredient (optional if typed above)</option>
           <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
             <?php while ($ing = $stock_note_ingredients->fetch_assoc()): ?>
               <option
                 value="<?= (int)$ing['id'] ?>"
+                data-name="<?= htmlspecialchars((string)$ing['name']) ?>"
                 data-unit="<?= htmlspecialchars((string)$ing['unit']) ?>"
                 data-current="<?= number_format((float)$ing['current_stock'], 2, '.', '') ?>"
                 data-reorder="<?= number_format((float)$ing['reorder_level'], 2, '.', '') ?>"
@@ -780,6 +848,7 @@ $recent_stock_notes = $conn->query("SELECT
         </select>
         <input id="observed-stock" type="number" step="0.01" min="0" name="observed_stock" placeholder="Observed stock" required>
         <input id="reorder-snapshot" type="number" step="0.01" min="0" name="reorder_level_snapshot" placeholder="Reorder level snapshot" required>
+        <input id="ingredient-unit" type="text" name="ingredient_unit" placeholder="Unit (e.g. kg, liters, pcs)">
         <div style="display:flex;flex-direction:column;gap:4px;">
           <input id="suggested-restock" type="number" step="0.01" min="0" name="suggested_restock_amount" placeholder="Suggested amount needed">
           <small id="suggested-restock-hint" style="color:rgba(250,247,242,0.72);">Suggestion updates from observed vs reorder levels.</small>
@@ -794,7 +863,7 @@ $recent_stock_notes = $conn->query("SELECT
         <input type="text" name="chef_comment" maxlength="300" placeholder="Comment for manager (restock, quality, expiry risk)" style="grid-column: span 2;" required>
         <button type="submit" name="submit_stock_note" value="1" class="btn btn-success">Send Note to Manager</button>
       </form>
-      <p style="margin-top:8px;color:rgba(250,247,242,0.72);font-size:13px;">Use this to flag low stock, expiry risk, and restock context for manager thresholds and purchasing.</p>
+      <p style="margin-top:8px;color:rgba(250,247,242,0.72);font-size:13px;">Chef can type any stock item name. If it does not exist yet, the system creates it automatically for manager follow-up and autofill.</p>
 
       <div style="margin-top:12px;">
         <h4 style="margin-bottom:8px;color:#FAF7F2;">Recent Kitchen Stock Notes</h4>
@@ -945,7 +1014,9 @@ $recent_stock_notes = $conn->query("SELECT
 </div>
 <script>
   (function () {
+    const ingredientNameInput = document.getElementById('stock-note-ingredient-name');
     const ingredientSelect = document.getElementById('stock-note-ingredient');
+    const unitInput = document.getElementById('ingredient-unit');
     const observedInput = document.getElementById('observed-stock');
     const reorderInput = document.getElementById('reorder-snapshot');
     const suggestedInput = document.getElementById('suggested-restock');
@@ -989,6 +1060,13 @@ $recent_stock_notes = $conn->query("SELECT
     if (ingredientSelect) {
       ingredientSelect.addEventListener('change', function () {
         const meta = selectedMeta();
+        const opt = ingredientSelect.options[ingredientSelect.selectedIndex];
+        if (ingredientNameInput && opt && opt.dataset && opt.dataset.name) {
+          ingredientNameInput.value = opt.dataset.name;
+        }
+        if (unitInput && opt && opt.dataset && opt.dataset.unit) {
+          unitInput.value = opt.dataset.unit;
+        }
         if (reorderInput && (reorderInput.value === '' || parseNum(reorderInput.value) <= 0)) {
           reorderInput.value = meta.reorder.toFixed(2);
         }
@@ -996,6 +1074,35 @@ $recent_stock_notes = $conn->query("SELECT
           suggestedInput.dataset.manual = '0';
         }
         updateSuggestion(true);
+      });
+    }
+
+    if (ingredientNameInput) {
+      ingredientNameInput.addEventListener('input', function () {
+        if (!ingredientSelect) {
+          return;
+        }
+        const typed = (ingredientNameInput.value || '').trim().toLowerCase();
+        if (typed === '') {
+          ingredientSelect.value = '';
+          return;
+        }
+        let matched = false;
+        for (let i = 0; i < ingredientSelect.options.length; i++) {
+          const opt = ingredientSelect.options[i];
+          const optName = ((opt.dataset && opt.dataset.name) ? opt.dataset.name : opt.text || '').trim().toLowerCase();
+          if (optName === typed) {
+            ingredientSelect.value = opt.value;
+            if (unitInput && opt.dataset && opt.dataset.unit) {
+              unitInput.value = opt.dataset.unit;
+            }
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) {
+          ingredientSelect.value = '';
+        }
       });
     }
 

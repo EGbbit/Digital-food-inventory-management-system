@@ -20,6 +20,13 @@ if (isset($_SESSION['user_id']) && isset($_SESSION['role'])) {
     redirect_by_role((string)$_SESSION['role']);
 }
 
+$allowedRoles = ['admin', 'manager', 'chef', 'waiter'];
+$roleHint = strtolower(trim((string)($_GET['role'] ?? $_POST['role'] ?? '')));
+if (!in_array($roleHint, $allowedRoles, true)) {
+    $roleHint = '';
+}
+$roleLabel = $roleHint !== '' ? ucfirst($roleHint) : 'User';
+
 if (isset($_GET['msg']) && $_GET['msg'] === 'admin_creates_accounts') {
     $info = "Accounts are created by admin. Use the credentials provided to you.";
 }
@@ -41,14 +48,22 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
         if (password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['user_name'] = $user['name'];
-            $_SESSION['role'] = $user['role'];
-            if (password_verify('1234', (string)$user['password'])) {
-                header('Location: change_password.php?first_login=1');
-                exit();
+            if ($roleHint !== '' && strtolower((string)$user['role']) !== $roleHint) {
+                $error = "Role mismatch: this account is not registered as " . ucfirst($roleHint) . ".";
+            } else {
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_name'] = $user['name'];
+                $_SESSION['role'] = $user['role'];
+
+                if (password_verify('1234', (string)$user['password'])) {
+                    header('Location: change_password.php?first_login=1');
+                    exit();
+                }
+
+                $successMessage = 'Login successful. Welcome, ' . (string)$user['name'] . '!';
+                $_SESSION['login_success_message'] = $successMessage;
+                redirect_by_role($user['role'], $successMessage);
             }
-            redirect_by_role($user['role']);
         } else {
             $_SESSION['login_error'] = "Invalid password!";
             $_SESSION['login_email'] = $prefillEmail;
@@ -92,12 +107,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <div class="container">
         <div class="header">
             <h1>FoodFlow</h1>
-            <p>Digital Food Inventory Management</p>
+            <p><?php echo htmlspecialchars($roleLabel); ?> Login - Digital Food Inventory Management</p>
         </div>
         <div class="form-container">
             <?php if (!empty($error)): ?><div class="error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
             <?php if (!empty($info)): ?><div class="info"><?php echo htmlspecialchars($info); ?></div><?php endif; ?>
             <form method="POST">
+                <?php if ($roleHint !== ''): ?>
+                    <input type="hidden" name="role" value="<?php echo htmlspecialchars($roleHint); ?>">
+                <?php endif; ?>
                 <div class="form-group">
                     <label for="email">Email Address</label>
                     <input type="email" id="email" name="email" required placeholder="Enter your email" value="<?php echo htmlspecialchars($prefillEmail); ?>">
@@ -109,8 +127,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 <button type="submit" class="btn">Login</button>
             </form>
             <div class="links">
-                <p>Need access? Contact your admin to create your role account.</p>
-                <p style="margin-top:8px;font-size:13px;color:#666;">Use your admin-assigned email and preset password.</p>
+                <p>Use the exact email account created by admin for your role.</p>
+                <p style="margin-top:8px;font-size:13px;color:#666;">If you selected <?php echo htmlspecialchars($roleLabel); ?> access, login must use a <?php echo htmlspecialchars($roleLabel); ?> account email.</p>
                 <a class="main-dashboard-link" href="../index.php">Back to Main Dashboard</a>
             </div>
         </div>

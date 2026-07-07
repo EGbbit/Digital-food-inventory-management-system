@@ -14,6 +14,13 @@ if ($conn->connect_error) {
 
 $waiterId = (int)$_SESSION['user_id'];
 $waiterName = !empty($_SESSION['user_name']) ? (string)$_SESSION['user_name'] : 'Waiter';
+$login_success_message = (string)($_SESSION['login_success_message'] ?? '');
+if ($login_success_message === '') {
+  $login_success_message = trim((string)($_GET['login_msg'] ?? ''));
+}
+if ($login_success_message !== '') {
+  unset($_SESSION['login_success_message']);
+}
 
 $todayOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
 $pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='pending'")->fetch_assoc()['count'];
@@ -438,6 +445,9 @@ $station = 'Floor Service - Dining';
     <div class="page-header">
       <h1>Floor Service - Live View</h1>
       <p><?= htmlspecialchars($waiterName) ?> - <?= date('l, d F Y - H:i') ?></p>
+      <?php if ($login_success_message !== ''): ?>
+        <p style="margin-top:10px;color:#BBDDFF;font-weight:600;"><?= htmlspecialchars($login_success_message) ?></p>
+      <?php endif; ?>
     </div>
 
     <div class="stats">
