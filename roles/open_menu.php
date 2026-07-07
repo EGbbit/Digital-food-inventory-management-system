@@ -49,6 +49,39 @@ $roleClassMap = [
     'admin' => 'dashboard-admin'
 ];
 $roleThemeClass = $roleClassMap[$role] ?? 'dashboard-manager';
+
+$dashboardLink = 'manager_dashboard.php';
+$navLinks = [
+    ['href' => 'manager_dashboard.php', 'label' => 'Dashboard'],
+    ['href' => 'manager_controls.php', 'label' => 'Thresholds & Approvals'],
+    ['href' => 'manager_reports.php', 'label' => 'Reports'],
+    ['href' => 'open_menu.php', 'label' => 'Open Food Menu', 'active' => true],
+];
+
+if ($role === 'admin') {
+    $dashboardLink = '../admin/admin_dashboard.php';
+    $navLinks = [
+        ['href' => '../admin/admin_dashboard.php', 'label' => 'Dashboard'],
+        ['href' => '../admin/manage_users.php', 'label' => 'Manage Users'],
+        ['href' => '../admin/system_audit.php', 'label' => 'System Audit'],
+        ['href' => 'open_menu.php', 'label' => 'Open Food Menu', 'active' => true],
+    ];
+} elseif ($role === 'chef') {
+    $dashboardLink = 'chef_dashboard.php';
+    $navLinks = [
+        ['href' => 'chef_dashboard.php', 'label' => 'Dashboard'],
+        ['href' => 'chef_inventory.php', 'label' => 'Inventory Console'],
+        ['href' => 'open_menu.php', 'label' => 'Open Food Menu', 'active' => true],
+        ['href' => 'ingredients.php', 'label' => 'Ingredients'],
+    ];
+} elseif ($role === 'waiter') {
+    $dashboardLink = 'waiter_dashboard.php';
+    $navLinks = [
+        ['href' => 'waiter_dashboard.php', 'label' => 'Dashboard'],
+        ['href' => 'waiter_orders.php', 'label' => 'Record Orders'],
+        ['href' => 'open_menu.php', 'label' => 'Open Food Menu', 'active' => true],
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -63,13 +96,25 @@ $roleThemeClass = $roleClassMap[$role] ?? 'dashboard-manager';
     <div class="navbar-brand">FoodFlow Open Menu</div>
     <div class="navbar-user">
         <span><?php echo htmlspecialchars((string)($_SESSION['user_name'] ?? 'User')); ?> (<?php echo htmlspecialchars((string)($_SESSION['role'] ?? 'staff')); ?>)</span>
+        <a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a>
         <a href="../auth/logout.php" class="logout-btn">Logout</a>
     </div>
+</nav>
+
+<nav class="admin-nav">
+    <ul class="admin-nav-links">
+        <?php foreach ($navLinks as $link): ?>
+            <li>
+                <a href="<?php echo htmlspecialchars($link['href']); ?>" class="<?php echo !empty($link['active']) ? 'active' : ''; ?>"><?php echo htmlspecialchars($link['label']); ?></a>
+            </li>
+        <?php endforeach; ?>
+    </ul>
 </nav>
 
 <div class="container">
     <div class="card">
         <h1>Open Food Menu</h1>
+        <p style="margin-bottom:12px;"><a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="btn btn-primary">Back to Dashboard</a></p>
         <form method="GET" class="form-grid" style="margin-bottom:12px;">
             <div class="form-group">
                 <label for="q">Search Food Item</label>

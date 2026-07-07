@@ -1,16 +1,18 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id'])) {
-    header("Location: ../auth/login.php");
-    exit();
+require_once __DIR__ . '/../core/auth.php';
+require_login();
+
+$role = (string)($_SESSION['role'] ?? '');
+if (!in_array($role, ['admin', 'manager'], true)) {
+    redirect_by_role($role);
 }
 
-$conn = new mysqli("localhost", "root", "1234", "food_inventory");
+$conn = new mysqli('localhost', 'root', '1234', 'food_inventory');
 if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
+    die('Database connection failed: ' . $conn->connect_error);
 }
 
-$message = "";
+$message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ingredient_id = (int)($_POST['ingredient_id'] ?? 0);
     $type = $_POST['movement_type'] ?? '';
@@ -19,9 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $allowed = ['stock_in', 'usage', 'adjustment', 'wastage'];
     if ($ingredient_id > 0 && in_array($type, $allowed, true) && $quantity > 0) {
-        $stmt = $conn->prepare("INSERT INTO stock_movements (ingredient_id, movement_type, quantity, notes, created_by) VALUES (?, ?, ?, ?, ?)");
+        $stmt = $conn->prepare('INSERT INTO stock_movements (ingredient_id, movement_type, quantity, notes, created_by) VALUES (?, ?, ?, ?, ?)');
         $createdBy = (int)$_SESSION['user_id'];
-        $stmt->bind_param("isdsi", $ingredient_id, $type, $quantity, $notes, $createdBy);
+        $stmt->bind_param('isdsi', $ingredient_id, $type, $quantity, $notes, $createdBy);
 
         if ($stmt->execute()) {
             if ($type === 'stock_in' || $type === 'adjustment') {
@@ -34,29 +36,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $reason = $notes !== '' ? $notes : 'Kitchen wastage';
                 $conn->query("INSERT INTO wastage_logs (ingredient_id, quantity, reason, logged_by) VALUES ($ingredient_id, $quantity, '" . $conn->real_escape_string($reason) . "', $createdBy)");
             }
-            $message = "Stock movement recorded.";
+            $message = 'Stock movement recorded.';
         } else {
-            $message = "Failed to save movement: " . $stmt->error;
+            $message = 'Failed to save movement: ' . $stmt->error;
         }
         $stmt->close();
     } else {
-        $message = "Please provide valid movement details.";
+        $message = 'Please provide valid movement details.';
     }
 }
 
-$ingredients = $conn->query("SELECT id, name, unit, current_stock FROM ingredients ORDER BY name");
-$history = $conn->query("SELECT sm.*, i.name AS ingredient_name, i.unit, u.name AS actor
+$ingredients = $conn->query('SELECT id, name, unit, current_stock FROM ingredients ORDER BY name');
+$history = $conn->query('SELECT sm.*, i.name AS ingredient_name, i.unit, u.name AS actor
     FROM stock_movements sm
     JOIN ingredients i ON sm.ingredient_id=i.id
     JOIN users u ON sm.created_by=u.id
     ORDER BY sm.created_at DESC
-    LIMIT 20");
+    LIMIT 20');
+$isAdmin = $role === 'admin';
 ?>
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Stock Movements - FoodFlow</title><link rel="stylesheet" href="admin_styles.css"></head>
-<body>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Stock Movements - FoodFlow</title><link rel="stylesheet" href="roles_styles.css"></head>
+<body class="dashboard-photo <?php echo $isAdmin ? 'dashboard-admin' : 'dashboard-manager'; ?>">
 <nav class="navbar"><div class="navbar-brand">FoodFlow Inventory</div><div class="navbar-user"><a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a><a href="../auth/logout.php" class="logout-btn">Logout</a></div></nav>
-<nav class="admin-nav"><ul class="admin-nav-links"><li><a href="admin_dashboard.php">Dashboard</a></li><?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?><li><a href="manage_users.php">Manage Users</a></li><li><a href="system_audit.php">System Audit</a></li><?php endif; ?></ul></nav>
+<nav class="admin-nav"><ul class="admin-nav-links"><?php if ($isAdmin): ?><li><a href="../admin/admin_dashboard.php">Dashboard</a></li><li><a href="../admin/manage_users.php">Manage Users</a></li><li><a href="../admin/system_audit.php">System Audit</a></li><?php else: ?><li><a href="manager_dashboard.php">Dashboard</a></li><li><a href="manager_controls.php">Thresholds &amp; Approvals</a></li><li><a href="manager_reports.php">Reports</a></li><?php endif; ?><li><a href="ingredients.php">Ingredients</a></li><li><a href="stock_movements.php" class="active">Stock Movements</a></li></ul></nav>
 <div class="container">
     <div class="card">
         <h3> Log Stock Movement</h3>
@@ -82,7 +85,7 @@ $history = $conn->query("SELECT sm.*, i.name AS ingredient_name, i.unit, u.name 
     </div>
 
     <div class="card" style="margin-top:16px;">
-        <h3>🕒 Recent Movements</h3>
+        <h3> Recent Movements</h3>
         <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;">
                 <thead><tr><th style="text-align:left;padding:8px;">Date</th><th style="text-align:left;padding:8px;">Ingredient</th><th style="text-align:left;padding:8px;">Type</th><th style="text-align:left;padding:8px;">Qty</th><th style="text-align:left;padding:8px;">By</th><th style="text-align:left;padding:8px;">Notes</th></tr></thead>

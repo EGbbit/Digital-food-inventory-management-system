@@ -122,6 +122,32 @@ $station = 'Floor Service - Dining';
       gap: 1.1rem;
     }
 
+    .topbar__actions {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .topbar__link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.24);
+      color: var(--cream);
+      text-decoration: none;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(255,255,255,0.08);
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .topbar__link:hover {
+      background: rgba(255,255,255,0.16);
+      border-color: rgba(255,255,255,0.38);
+    }
+
     .topbar__meta {
       font-size: 0.72rem;
       letter-spacing: 0.14em;
@@ -378,6 +404,7 @@ $station = 'Floor Service - Dining';
       .layout { grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .stats { grid-template-columns: repeat(2, 1fr); }
+      .topbar__meta { display: none; }
     }
   </style>
 </head>
@@ -389,6 +416,9 @@ $station = 'Floor Service - Dining';
     <div class="topbar__brand">FoodFlow <em>-</em> Service</div>
     <div class="topbar__right">
       <span class="topbar__meta"><?= htmlspecialchars($station) ?></span>
+      <div class="topbar__actions">
+        <a href="../auth/change_password.php" class="topbar__link">Change Password</a>
+      </div>
       <div class="avatar">WV</div>
     </div>
   </header>

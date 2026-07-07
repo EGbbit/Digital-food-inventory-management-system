@@ -197,10 +197,27 @@ if ($isLoggedIn) {
 
         <div class="access-grid">
             <?php if ($isLoggedIn): ?>
-                <a href="<?php echo htmlspecialchars($dashboardLink); ?>" class="role-access access-admin">Go to Dashboard</a>
-                <a href="auth/logout.php" class="role-access access-manager">Logout</a>
-                <a href="admin/inventory_reports.php" class="role-access access-chef">View Reports</a>
-                <a href="admin/ingredients.php" class="role-access access-waiter">View Ingredients</a>
+                <?php if ($_SESSION['role'] === 'admin'): ?>
+                    <a href="admin/admin_dashboard.php" class="role-access access-admin">Admin Dashboard</a>
+                    <a href="admin/manage_users.php" class="role-access access-manager">Manage Users</a>
+                    <a href="admin/system_audit.php" class="role-access access-chef">System Audit</a>
+                    <a href="auth/logout.php" class="role-access access-waiter">Logout</a>
+                <?php elseif ($_SESSION['role'] === 'manager'): ?>
+                    <a href="roles/manager_dashboard.php" class="role-access access-admin">Manager Dashboard</a>
+                    <a href="roles/manager_reports.php" class="role-access access-manager">View Reports</a>
+                    <a href="roles/ingredients.php" class="role-access access-chef">Ingredients</a>
+                    <a href="auth/logout.php" class="role-access access-waiter">Logout</a>
+                <?php elseif ($_SESSION['role'] === 'chef'): ?>
+                    <a href="roles/chef_dashboard.php" class="role-access access-admin">Chef Dashboard</a>
+                    <a href="roles/chef_inventory.php" class="role-access access-manager">Inventory Console</a>
+                    <a href="roles/open_menu.php" class="role-access access-chef">Open Menu</a>
+                    <a href="auth/logout.php" class="role-access access-waiter">Logout</a>
+                <?php else: ?>
+                    <a href="roles/waiter_dashboard.php" class="role-access access-admin">Waiter Dashboard</a>
+                    <a href="roles/waiter_orders.php" class="role-access access-manager">Record Orders</a>
+                    <a href="roles/open_menu.php" class="role-access access-chef">Open Menu</a>
+                    <a href="auth/logout.php" class="role-access access-waiter">Logout</a>
+                <?php endif; ?>
             <?php else: ?>
                 <a href="auth/login.php?role=admin" class="role-access access-admin">Admin Access</a>
                 <a href="auth/login.php?role=manager" class="role-access access-manager">Manager Access</a>

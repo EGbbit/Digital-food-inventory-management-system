@@ -350,6 +350,32 @@ $recent_stock_notes = $conn->query("SELECT
 
     .topbar__right { display: flex; align-items: center; gap: 1.2rem; }
 
+    .topbar__actions {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .topbar__link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.2);
+      color: var(--cream);
+      text-decoration: none;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(255,255,255,0.06);
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .topbar__link:hover {
+      background: rgba(255,255,255,0.14);
+      border-color: rgba(255,255,255,0.32);
+    }
+
     .avatar {
       width: 36px;
       height: 36px;
@@ -616,6 +642,7 @@ $recent_stock_notes = $conn->query("SELECT
       .layout { grid-template-columns: 1fr; }
       .sidebar { display: none; }
       .stats { grid-template-columns: repeat(2, 1fr); }
+      .topbar__meta { display: none; }
     }
   </style>
 </head>
@@ -628,6 +655,9 @@ $recent_stock_notes = $conn->query("SELECT
     <div class="topbar__brand">FoodFlow <em>-</em> Kitchen</div>
     <div class="topbar__right">
       <span class="topbar__meta"><?= htmlspecialchars($station) ?></span>
+      <div class="topbar__actions">
+        <a href="../auth/change_password.php" class="topbar__link">Change Password</a>
+      </div>
       <div class="avatar">CM</div>
     </div>
   </header>
@@ -654,6 +684,9 @@ $recent_stock_notes = $conn->query("SELECT
     </a>
 
     <span class="sidebar__label">System</span>
+    <a href="../auth/change_password.php" class="nav-item">
+      <span class="nav-item__icon">🔐</span> Change Password
+    </a>
     <a href="../auth/logout.php" class="nav-item">
       <span class="nav-item__icon">⎋</span> Sign Out
     </a>

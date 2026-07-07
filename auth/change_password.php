@@ -11,6 +11,18 @@ if ($conn->connect_error) {
 
 $error = "";
 $success = "";
+$showPresetNotice = false;
+
+$userId = (int)$_SESSION['user_id'];
+$userStmt = $conn->prepare("SELECT password FROM users WHERE id = ? LIMIT 1");
+$userStmt->bind_param("i", $userId);
+$userStmt->execute();
+$userRow = $userStmt->get_result()->fetch_assoc();
+$userStmt->close();
+
+if ($userRow && isset($userRow['password'])) {
+    $showPresetNotice = password_verify('1234', (string)$userRow['password']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $currentPassword = $_POST['current_password'] ?? '';
@@ -22,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (strlen($newPassword) < 6) {
         $error = "New password must be at least 6 characters.";
     } else {
-        $userId = (int)$_SESSION['user_id'];
         $stmt = $conn->prepare("SELECT password FROM users WHERE id = ? LIMIT 1");
         $stmt->bind_param("i", $userId);
         $stmt->execute();
@@ -38,6 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $update->bind_param("si", $newHash, $userId);
             if ($update->execute()) {
                 $success = "Password updated successfully.";
+                $showPresetNotice = false;
             } else {
                 $error = "Unable to update password right now.";
             }
@@ -70,15 +82,21 @@ $conn->close();
         .links a { color: #4facfe; text-decoration: none; font-weight: 500; }
         .error { background: #fee; color: #c33; padding: 10px; border-radius: 5px; margin-bottom: 14px; text-align: center; border: 1px solid #fcc; }
         .success { background: #efe; color: #2f7d32; padding: 10px; border-radius: 5px; margin-bottom: 14px; text-align: center; border: 1px solid #b9e6bd; }
+        .notice { background: #fff8e1; color: #6a4f00; padding: 10px; border-radius: 5px; margin-bottom: 14px; text-align: center; border: 1px solid #f3e0a7; font-weight: 600; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>Change Password</h1>
-            <p>Update your preset login password</p>
+            <?php if ($showPresetNotice): ?>
+                <p>Hello new user! change your password to a secure password for login</p>
+            <?php else: ?>
+                <p>Keep your account secure with a strong password</p>
+            <?php endif; ?>
         </div>
         <div class="form-container">
+            <?php if ($showPresetNotice): ?><div class="notice">Hello new user! change your password to a secure password for login</div><?php endif; ?>
             <?php if ($error !== ''): ?><div class="error"><?php echo htmlspecialchars($error); ?></div><?php endif; ?>
             <?php if ($success !== ''): ?><div class="success"><?php echo htmlspecialchars($success); ?></div><?php endif; ?>
 
@@ -99,7 +117,7 @@ $conn->close();
             </form>
 
             <div class="links">
-                <a href="login.php">Back to Login</a>
+                <a href="logout.php">Back to Login</a>
             </div>
         </div>
     </div>

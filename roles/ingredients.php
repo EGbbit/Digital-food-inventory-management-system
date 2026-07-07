@@ -1,17 +1,21 @@
 <?php
-session_start();
-if (!isset($_SESSION['user_id'])) {
-    header("Location: ../auth/login.php");
-    exit();
+require_once __DIR__ . '/../core/auth.php';
+require_login();
+
+$role = (string)($_SESSION['role'] ?? '');
+if (!in_array($role, ['admin', 'manager', 'chef'], true)) {
+    redirect_by_role($role);
 }
 
-$conn = new mysqli("localhost", "root", "1234", "food_inventory");
+$canManage = in_array($role, ['admin', 'manager'], true);
+
+$conn = new mysqli('localhost', 'root', '1234', 'food_inventory');
 if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
+    die('Database connection failed: ' . $conn->connect_error);
 }
 
-$message = "";
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_SESSION['role'] === 'admin' || $_SESSION['role'] === 'manager')) {
+$message = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canManage) {
     $name = trim($_POST['name'] ?? '');
     $category = trim($_POST['category'] ?? '');
     $unit = trim($_POST['unit'] ?? 'kg');
@@ -20,25 +24,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_SESSION['role'] === 'admin' || $
     $cost = (float)($_POST['unit_cost'] ?? 0);
 
     if ($name !== '') {
-        $stmt = $conn->prepare("INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssddd", $name, $category, $unit, $stock, $reorder, $cost);
-        $message = $stmt->execute() ? "Ingredient added." : ("Add failed: " . $stmt->error);
+        $stmt = $conn->prepare('INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost) VALUES (?, ?, ?, ?, ?, ?)');
+        $stmt->bind_param('sssddd', $name, $category, $unit, $stock, $reorder, $cost);
+        $message = $stmt->execute() ? 'Ingredient added.' : ('Add failed: ' . $stmt->error);
         $stmt->close();
     }
 }
 
-$ingredients = $conn->query("SELECT * FROM ingredients ORDER BY name");
+$ingredients = $conn->query('SELECT * FROM ingredients ORDER BY name');
+$isAdmin = $role === 'admin';
+$isChef = $role === 'chef';
 ?>
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ingredients - FoodFlow</title><link rel="stylesheet" href="admin_styles.css"></head>
-<body>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ingredients - FoodFlow</title><link rel="stylesheet" href="roles_styles.css"></head>
+<body class="dashboard-photo <?php echo $isAdmin ? 'dashboard-admin' : ($isChef ? 'dashboard-chef' : 'dashboard-manager'); ?>">
 <nav class="navbar"><div class="navbar-brand">FoodFlow Inventory</div><div class="navbar-user"><a href="../auth/change_password.php" class="logout-btn" style="margin-right:8px;background:#1f7a8c;">Change Password</a><a href="../auth/logout.php" class="logout-btn">Logout</a></div></nav>
-<nav class="admin-nav"><ul class="admin-nav-links"><li><a href="admin_dashboard.php">Dashboard</a></li><?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?><li><a href="manage_users.php">Manage Users</a></li><li><a href="system_audit.php">System Audit</a></li><?php endif; ?></ul></nav>
+<nav class="admin-nav"><ul class="admin-nav-links"><?php if ($isAdmin): ?><li><a href="../admin/admin_dashboard.php">Dashboard</a></li><li><a href="../admin/manage_users.php">Manage Users</a></li><li><a href="../admin/system_audit.php">System Audit</a></li><?php elseif ($isChef): ?><li><a href="chef_dashboard.php">Dashboard</a></li><li><a href="chef_inventory.php">Inventory Console</a></li><li><a href="open_menu.php">Open Food Menu</a></li><?php else: ?><li><a href="manager_dashboard.php">Dashboard</a></li><li><a href="manager_controls.php">Thresholds &amp; Approvals</a></li><li><a href="manager_reports.php">Reports</a></li><?php endif; ?><li><a href="ingredients.php" class="active">Ingredients</a></li><?php if (!$isChef): ?><li><a href="stock_movements.php">Stock Movements</a></li><?php endif; ?></ul></nav>
 <div class="container">
+    <?php if ($canManage): ?>
     <div class="card">
         <h3> Ingredient Master</h3>
         <?php if ($message): ?><p><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
-        <?php if ($_SESSION['role'] === 'admin' || $_SESSION['role'] === 'manager'): ?>
         <form method="POST" style="display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:10px;">
             <input type="text" name="name" placeholder="Ingredient name" required>
             <input type="text" name="category" placeholder="Category">
@@ -48,8 +54,8 @@ $ingredients = $conn->query("SELECT * FROM ingredients ORDER BY name");
             <input type="number" step="0.01" name="unit_cost" placeholder="Unit cost" required>
             <button type="submit" class="action-btn">Add Ingredient</button>
         </form>
-        <?php endif; ?>
     </div>
+    <?php endif; ?>
 
     <div class="card" style="margin-top:16px;">
         <h3> Stock Overview</h3>
