@@ -50,7 +50,7 @@ $openTables = $conn->query("SELECT table_number, COUNT(*) AS total
     ORDER BY total DESC, table_number ASC
     LIMIT 6");
 
-$station = 'Floor Service - Dining';
+$station = 'Waiter Station - Dining';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -452,7 +452,7 @@ $station = 'Floor Service - Dining';
 
   <main>
     <div class="page-header">
-      <h1>Floor Service - Live View</h1>
+      <h1>Waiter Dashboard - Live View</h1>
       <p><?= htmlspecialchars($waiterName) ?> - <?= date('l, d F Y - H:i') ?></p>
       <?php if ($login_success_message !== ''): ?>
         <p style="margin-top:10px;color:#BBDDFF;font-weight:600;"><?= htmlspecialchars($login_success_message) ?></p>
