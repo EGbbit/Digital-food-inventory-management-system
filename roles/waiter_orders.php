@@ -53,7 +53,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    $table_number = trim($_POST['table_number'] ?? '');
+    $table_number = strtoupper(trim($_POST['table_number'] ?? ''));
+    // Normalize common waiter input variants (e.g. 1, t1, table 1) to T1.
+    if (preg_match('/^(?:TABLE\s*)?T?\s*(\d{1,3})$/i', $table_number, $tableMatch)) {
+        $table_number = 'T' . ltrim($tableMatch[1], '0');
+        if ($table_number === 'T') {
+            $table_number = 'T0';
+        }
+    }
     $menu_item_id = (int)($_POST['menu_item_id'] ?? 0);
     $food_item_name = trim((string)($_POST['food_item_name'] ?? ''));
     $meal_category = trim((string)($_POST['meal_category'] ?? ''));

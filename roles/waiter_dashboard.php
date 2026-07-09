@@ -22,10 +22,10 @@ if ($login_success_message !== '') {
   unset($_SESSION['login_success_message']);
 }
 
-$todayOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
-$pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='pending'")->fetch_assoc()['count'];
-$preparingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='preparing'")->fetch_assoc()['count'];
-$servedOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='served'")->fetch_assoc()['count'];
+$todayOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status <> 'cancelled'")->fetch_assoc()['count'];
+$pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='pending' AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
+$preparingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='preparing' AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
+$servedOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND status='served' AND DATE(created_at)=CURDATE()")->fetch_assoc()['count'];
 
 $recentOrders = $conn->query("SELECT
   o.order_number,
@@ -42,11 +42,22 @@ $recentOrders = $conn->query("SELECT
   ORDER BY o.created_at DESC
   LIMIT 8");
 
-$openTables = $conn->query("SELECT table_number, COUNT(*) AS total
+$openTables = $conn->query("SELECT
+    CASE
+      WHEN UPPER(REPLACE(REPLACE(REPLACE(TRIM(table_number), 'TABLE', ''), ' ', ''), 'T', '')) REGEXP '^[0-9]+$'
+      THEN CONCAT('T', UPPER(REPLACE(REPLACE(REPLACE(TRIM(table_number), 'TABLE', ''), ' ', ''), 'T', '')))
+      ELSE UPPER(TRIM(table_number))
+    END AS table_number,
+    COUNT(*) AS total
     FROM orders
     WHERE waiter_id = $waiterId
       AND status IN ('pending', 'preparing')
-    GROUP BY table_number
+    GROUP BY
+      CASE
+        WHEN UPPER(REPLACE(REPLACE(REPLACE(TRIM(table_number), 'TABLE', ''), ' ', ''), 'T', '')) REGEXP '^[0-9]+$'
+        THEN CONCAT('T', UPPER(REPLACE(REPLACE(REPLACE(TRIM(table_number), 'TABLE', ''), ' ', ''), 'T', '')))
+        ELSE UPPER(TRIM(table_number))
+      END
     ORDER BY total DESC, table_number ASC
     LIMIT 6");
 
@@ -468,17 +479,17 @@ $station = 'Waiter Station - Dining';
       <div class="stat-card">
         <div class="stat-card__label">Pending</div>
         <div class="stat-card__val"><?= $pendingOrders ?></div>
-        <div class="stat-card__sub">Awaiting kitchen</div>
+        <div class="stat-card__sub">Awaiting kitchen today</div>
       </div>
       <div class="stat-card">
         <div class="stat-card__label">Preparing</div>
         <div class="stat-card__val"><?= $preparingOrders ?></div>
-        <div class="stat-card__sub">In progress</div>
+        <div class="stat-card__sub">In kitchen today</div>
       </div>
       <div class="stat-card">
         <div class="stat-card__label">Served</div>
         <div class="stat-card__val"><?= $servedOrders ?></div>
-        <div class="stat-card__sub">Completed</div>
+        <div class="stat-card__sub">Completed today</div>
       </div>
     </div>
 
