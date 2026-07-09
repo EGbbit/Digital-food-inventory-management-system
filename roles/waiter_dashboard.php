@@ -27,11 +27,20 @@ $pendingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE w
 $preparingOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='preparing'")->fetch_assoc()['count'];
 $servedOrders = (int)$conn->query("SELECT COUNT(*) AS count FROM orders WHERE waiter_id = $waiterId AND DATE(created_at)=CURDATE() AND status='served'")->fetch_assoc()['count'];
 
-$recentOrders = $conn->query("SELECT order_number, table_number, status, total_amount, created_at
-    FROM orders
-    WHERE waiter_id = $waiterId
-    ORDER BY created_at DESC
-    LIMIT 8");
+$recentOrders = $conn->query("SELECT
+  o.order_number,
+  o.table_number,
+  o.status,
+  o.total_amount,
+  o.created_at,
+  IFNULL(GROUP_CONCAT(CONCAT(mi.name, ' x', oi.quantity) ORDER BY mi.name SEPARATOR ', '), 'No items') AS items_summary
+  FROM orders o
+  LEFT JOIN order_items oi ON oi.order_id = o.id
+  LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+  WHERE o.waiter_id = $waiterId
+  GROUP BY o.id, o.order_number, o.table_number, o.status, o.total_amount, o.created_at
+  ORDER BY o.created_at DESC
+  LIMIT 8");
 
 $openTables = $conn->query("SELECT table_number, COUNT(*) AS total
     FROM orders
@@ -487,6 +496,7 @@ $station = 'Floor Service - Dining';
                 <div class="order-row__table">T<?= htmlspecialchars((string)$order['table_number']) ?></div>
                 <div>
                   <div class="order-row__title"><?= htmlspecialchars((string)$order['order_number']) ?> - Kshs. <?= number_format((float)$order['total_amount'], 2) ?></div>
+                  <div class="order-row__meta">Items: <?= htmlspecialchars((string)$order['items_summary']) ?></div>
                   <div class="order-row__meta">Created <?= date('H:i', strtotime((string)$order['created_at'])) ?></div>
                 </div>
                 <span class="status <?= htmlspecialchars($statusClass) ?>"><?= htmlspecialchars(ucfirst($status)) ?></span>

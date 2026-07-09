@@ -116,8 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
       $comment = substr($comment, 0, 300);
 
-      // Priority: if chef typed an item name, use it (resolve existing or auto-create).
-      // Otherwise use selected ingredient ID from dropdown.
+      // Priority: use typed item name (resolve existing or auto-create).
       if ($ingredientName !== '') {
         $lookupStmt = $conn->prepare('SELECT id, reorder_level FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1');
         if ($lookupStmt) {
@@ -150,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       }
 
       if ($ingredientId <= 0) {
-        $message = 'Select an existing ingredient or type a new stock item name.';
+        $message = 'Type a stock item name to submit a chef note.';
         goto end_stock_note;
       }
 
@@ -503,7 +502,7 @@ $recent_stock_notes = $conn->query("SELECT
       border-radius: 20px;
     }
 
-    main { padding: 2rem 2.2rem; overflow-y: auto; }
+    main { padding: 2rem 2.2rem; overflow-y: auto; display: flex; flex-direction: column; }
 
     .page-header { margin-bottom: 1.8rem; }
 
@@ -688,8 +687,114 @@ $recent_stock_notes = $conn->query("SELECT
     .inv-item__pct--warn { color: var(--amber); }
     .inv-item__pct--low  { color: var(--red); }
 
+    .stock-notes-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .stock-notes-title {
+      margin-bottom: 0.9rem;
+      color: #BDECCB;
+      font-size: 1rem;
+    }
+
+    .stock-note-form {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+      align-items: end;
+      padding: 0.9rem;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .stock-note-form input,
+    .stock-note-form select {
+      width: 100%;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(0,0,0,0.18);
+      color: var(--cream);
+      padding: 0.55rem 0.6rem;
+      font-size: 0.84rem;
+    }
+
+    .stock-note-form input::placeholder {
+      color: rgba(250,247,242,0.55);
+    }
+
+    .stock-note-form__stack {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .stock-note-form__wide {
+      grid-column: span 2;
+    }
+
+    .stock-note-help {
+      margin-top: 8px;
+      color: rgba(250,247,242,0.72);
+      font-size: 13px;
+    }
+
+    .stock-notes-recent {
+      margin-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+      padding-top: 10px;
+    }
+
+    .stock-notes-recent h4 {
+      margin-bottom: 8px;
+      color: #FAF7F2;
+      font-size: 0.9rem;
+    }
+
+    .stock-note-entry {
+      padding: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .stock-note-entry:last-child {
+      margin-bottom: 0;
+    }
+
+    .stock-note-entry__head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .stock-note-entry__metrics {
+      font-size: 13px;
+      color: rgba(250,247,242,0.78);
+      margin-top: 4px;
+    }
+
+    .stock-note-entry__comment {
+      font-size: 13px;
+      color: rgba(250,247,242,0.88);
+      margin-top: 4px;
+    }
+
+    .stock-note-entry__meta {
+      font-size: 12px;
+      color: rgba(250,247,242,0.52);
+      margin-top: 4px;
+    }
+
     @media (max-width: 1000px) {
       .two-col { grid-template-columns: 1fr; }
+      .stock-note-form { grid-template-columns: 1fr 1fr; }
+      .stock-note-form__wide { grid-column: span 2; }
     }
 
     @media (max-width: 860px) {
@@ -697,6 +802,8 @@ $recent_stock_notes = $conn->query("SELECT
       .sidebar { display: none; }
       .stats { grid-template-columns: repeat(2, 1fr); }
       .topbar__meta { display: none; }
+      .stock-note-form { grid-template-columns: 1fr; }
+      .stock-note-form__wide { grid-column: span 1; }
     }
   </style>
 </head>
@@ -719,30 +826,30 @@ $recent_stock_notes = $conn->query("SELECT
   <nav class="sidebar">
     <span class="sidebar__label">Kitchen</span>
     <a href="#" class="nav-item active">
-      <span class="nav-item__icon">🍽️</span> Ticket Queue
+      <span class="nav-item__icon"></span> Ticket Queue
       <span class="badge"><?= (int)$active_tickets ?></span>
     </a>
     <form method="POST" style="margin:0;">
       <button type="submit" name="send_low_stock_alerts" value="1" class="nav-item nav-item--button">
-        <span class="nav-item__icon">⚠️</span> Low Stock Alert
+        <span class="nav-item__icon"></span> Low Stock Alert
         <span class="badge"><?= (int)$low_stock_items ?></span>
       </button>
     </form>
 
     <span class="sidebar__label">Planning</span>
     <a href="chef_inventory.php" class="nav-item">
-      <span class="nav-item__icon">📦</span> Inventory Console
+      <span class="nav-item__icon"></span> Inventory Console
     </a>
     <a href="open_menu.php" class="nav-item">
-      <span class="nav-item__icon">📋</span> Today's Menu
+      <span class="nav-item__icon"></span> Today's Menu
     </a>
 
     <span class="sidebar__label">System</span>
     <a href="../auth/change_password.php" class="nav-item">
-      <span class="nav-item__icon">🔐</span> Change Password
+      <span class="nav-item__icon"></span> Change Password
     </a>
     <a href="../auth/logout.php" class="nav-item">
-      <span class="nav-item__icon">⎋</span> Sign Out
+      <span class="nav-item__icon"></span> Sign Out
     </a>
   </nav>
 
@@ -781,7 +888,7 @@ $recent_stock_notes = $conn->query("SELECT
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;">
+    <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;order:1;">
       <h3 style="margin-bottom:8px;color:#BDECCB;">New Order Alerts (Waiter -> Kitchen): <?= (int)$new_order_alerts_count ?></h3>
       <?php if ($new_order_alerts && $new_order_alerts->num_rows > 0): ?>
         <?php while ($alert = $new_order_alerts->fetch_assoc()): ?>
@@ -817,42 +924,26 @@ $recent_stock_notes = $conn->query("SELECT
       <?php endif; ?>
     </div>
 
-    <div class="card" style="margin-bottom:18px;background:rgba(10, 7, 4, 0.70);border:1px solid rgba(255,255,255,0.09);border-radius:8px;padding:1rem;">
-      <h3 style="margin-bottom:10px;color:#BDECCB;">Low Stock and Shelf-Life Notes (Chef -> Manager)</h3>
-      <form method="POST" style="display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;align-items:end;">
+    <div class="card stock-notes-card" style="margin-bottom:18px;order:3;">
+      <h3 class="stock-notes-title">Low Stock and Shelf-Life Notes (Chef -> Manager)</h3>
+      <form method="POST" class="stock-note-form">
         <input id="stock-note-ingredient-name" type="text" name="ingredient_name" list="stock-note-ingredient-list" placeholder="Type stock item name (new or existing)">
         <datalist id="stock-note-ingredient-list">
           <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
             <?php mysqli_data_seek($stock_note_ingredients, 0); ?>
             <?php while ($ingList = $stock_note_ingredients->fetch_assoc()): ?>
-              <option value="<?= htmlspecialchars((string)$ingList['name']) ?>"></option>
+              <option
+                value="<?= htmlspecialchars((string)$ingList['name']) ?>"
+                data-unit="<?= htmlspecialchars((string)$ingList['unit']) ?>"
+                data-reorder="<?= number_format((float)$ingList['reorder_level'], 2, '.', '') ?>"
+              ></option>
             <?php endwhile; ?>
             <?php mysqli_data_seek($stock_note_ingredients, 0); ?>
           <?php endif; ?>
         </datalist>
-        <select id="stock-note-ingredient" name="ingredient_id">
-          <option value="">Select existing ingredient (optional if typed above)</option>
-          <?php if ($stock_note_ingredients && $stock_note_ingredients->num_rows > 0): ?>
-            <?php while ($ing = $stock_note_ingredients->fetch_assoc()): ?>
-              <option
-                value="<?= (int)$ing['id'] ?>"
-                data-name="<?= htmlspecialchars((string)$ing['name']) ?>"
-                data-unit="<?= htmlspecialchars((string)$ing['unit']) ?>"
-                data-current="<?= number_format((float)$ing['current_stock'], 2, '.', '') ?>"
-                data-reorder="<?= number_format((float)$ing['reorder_level'], 2, '.', '') ?>"
-              >
-                <?= htmlspecialchars((string)$ing['name']) ?> (stock <?= number_format((float)$ing['current_stock'], 2) ?> <?= htmlspecialchars((string)$ing['unit']) ?> / reorder <?= number_format((float)$ing['reorder_level'], 2) ?>)
-              </option>
-            <?php endwhile; ?>
-          <?php endif; ?>
-        </select>
-        <input id="observed-stock" type="number" step="0.01" min="0" name="observed_stock" placeholder="Observed stock" required>
-        <input id="reorder-snapshot" type="number" step="0.01" min="0" name="reorder_level_snapshot" placeholder="Reorder level snapshot" required>
+        <input id="reorder-snapshot" type="hidden" name="reorder_level_snapshot" value="0">
         <input id="ingredient-unit" type="text" name="ingredient_unit" placeholder="Unit (e.g. kg, liters, pcs)">
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          <input id="suggested-restock" type="number" step="0.01" min="0" name="suggested_restock_amount" placeholder="Suggested amount needed">
-          <small id="suggested-restock-hint" style="color:rgba(250,247,242,0.72);">Suggestion updates from observed vs reorder levels.</small>
-        </div>
+        <input id="suggested-restock" type="number" step="0.01" min="0" name="suggested_restock_amount" placeholder="Suggested amount">
         <select name="urgency" required>
           <option value="normal">Normal</option>
           <option value="watch" selected>Watch</option>
@@ -860,13 +951,11 @@ $recent_stock_notes = $conn->query("SELECT
         </select>
         <input type="number" step="1" min="0" name="shelf_life_days" placeholder="Shelf life (days)">
         <input type="date" name="expected_expiry_date" placeholder="Expected expiry date">
-        <input type="text" name="chef_comment" maxlength="300" placeholder="Comment for manager (restock, quality, expiry risk)" style="grid-column: span 2;" required>
+        <input type="text" name="chef_comment" maxlength="300" placeholder="Comment for manager (restock, quality, expiry risk)" class="stock-note-form__wide" required>
         <button type="submit" name="submit_stock_note" value="1" class="btn btn-success">Send Note to Manager</button>
       </form>
-      <p style="margin-top:8px;color:rgba(250,247,242,0.72);font-size:13px;">Chef can type any stock item name. If it does not exist yet, the system creates it automatically for manager follow-up and autofill.</p>
-
-      <div style="margin-top:12px;">
-        <h4 style="margin-bottom:8px;color:#FAF7F2;">Recent Kitchen Stock Notes</h4>
+      <div class="stock-notes-recent">
+        <h4>Recent Kitchen Stock Notes</h4>
         <?php if ($recent_stock_notes && $recent_stock_notes->num_rows > 0): ?>
           <?php while ($note = $recent_stock_notes->fetch_assoc()): ?>
             <?php
@@ -883,19 +972,19 @@ $recent_stock_notes = $conn->query("SELECT
                 }
               }
             ?>
-            <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);">
-              <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;">
+            <div class="stock-note-entry">
+              <div class="stock-note-entry__head">
                 <strong><?= htmlspecialchars((string)$note['ingredient_name']) ?></strong>
                 <span class="status <?= ((string)$note['urgency'] === 'urgent') ? 'status-cancelled' : (((string)$note['urgency'] === 'watch') ? 'status-pending' : 'status-served') ?>"><?= htmlspecialchars($urgencyLabel) ?></span>
               </div>
-              <div style="font-size:13px;color:rgba(250,247,242,0.78);margin-top:4px;">
+              <div class="stock-note-entry__metrics">
                 Stock <?= number_format((float)$note['observed_stock'], 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
                 Reorder <?= number_format((float)$note['reorder_level_snapshot'], 2) ?> |
                 Suggested restock <?= number_format((float)($note['suggested_restock_amount'] ?? 0), 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
                 <?= $expiryText ?>
               </div>
-              <div style="font-size:13px;color:rgba(250,247,242,0.86);margin-top:4px;"><?= htmlspecialchars((string)$note['comment']) ?></div>
-              <div style="font-size:12px;color:rgba(250,247,242,0.52);margin-top:3px;">
+              <div class="stock-note-entry__comment"><?= htmlspecialchars((string)$note['comment']) ?></div>
+              <div class="stock-note-entry__meta">
                 <?= date('Y-m-d H:i', strtotime((string)$note['created_at'])) ?> |
                 <?php if ((int)$note['is_acknowledged'] === 1): ?>
                   Acknowledged by <?= htmlspecialchars((string)($note['ack_manager_name'] ?? 'manager')) ?>
@@ -914,7 +1003,7 @@ $recent_stock_notes = $conn->query("SELECT
       </div>
     </div>
 
-    <div class="two-col">
+    <div class="two-col" style="order:2;margin-bottom:12px;">
       <div>
         <p class="section-title">Active Ticket Queue</p>
         <div class="ticket-queue">
@@ -1015,12 +1104,10 @@ $recent_stock_notes = $conn->query("SELECT
 <script>
   (function () {
     const ingredientNameInput = document.getElementById('stock-note-ingredient-name');
-    const ingredientSelect = document.getElementById('stock-note-ingredient');
+    const ingredientDatalist = document.getElementById('stock-note-ingredient-list');
     const unitInput = document.getElementById('ingredient-unit');
-    const observedInput = document.getElementById('observed-stock');
     const reorderInput = document.getElementById('reorder-snapshot');
     const suggestedInput = document.getElementById('suggested-restock');
-    const hint = document.getElementById('suggested-restock-hint');
 
     function parseNum(value) {
       const n = parseFloat(value || '0');
@@ -1028,23 +1115,34 @@ $recent_stock_notes = $conn->query("SELECT
     }
 
     function selectedMeta() {
-      if (!ingredientSelect) {
-        return { unit: 'units', reorder: 0 };
+      const unit = unitInput && unitInput.value.trim() !== '' ? unitInput.value.trim() : 'units';
+      return { unit, reorder: parseNum(reorderInput ? reorderInput.value : '0') };
+    }
+
+    function findIngredientOptionByName(name) {
+      if (!ingredientDatalist) {
+        return null;
       }
-      const opt = ingredientSelect.options[ingredientSelect.selectedIndex];
-      return {
-        unit: (opt && opt.dataset && opt.dataset.unit) ? opt.dataset.unit : 'units',
-        reorder: (opt && opt.dataset && opt.dataset.reorder) ? parseNum(opt.dataset.reorder) : 0
-      };
+      const typed = (name || '').trim().toLowerCase();
+      if (typed === '') {
+        return null;
+      }
+      for (let i = 0; i < ingredientDatalist.options.length; i++) {
+        const opt = ingredientDatalist.options[i];
+        if ((opt.value || '').trim().toLowerCase() === typed) {
+          return opt;
+        }
+      }
+      return null;
     }
 
     function updateSuggestion(force) {
-      if (!suggestedInput || !observedInput || !reorderInput) {
+      if (!suggestedInput || !reorderInput) {
         return;
       }
 
       const meta = selectedMeta();
-      const observed = parseNum(observedInput.value);
+      const observed = 0;
       const reorder = parseNum(reorderInput.value);
       const suggestion = Math.max(0, reorder - observed);
 
@@ -1052,62 +1150,23 @@ $recent_stock_notes = $conn->query("SELECT
         suggestedInput.value = suggestion.toFixed(2);
       }
 
-      if (hint) {
-        hint.textContent = 'Suggested amount needed: ' + suggestion.toFixed(2) + ' ' + meta.unit;
-      }
-    }
-
-    if (ingredientSelect) {
-      ingredientSelect.addEventListener('change', function () {
-        const meta = selectedMeta();
-        const opt = ingredientSelect.options[ingredientSelect.selectedIndex];
-        if (ingredientNameInput && opt && opt.dataset && opt.dataset.name) {
-          ingredientNameInput.value = opt.dataset.name;
-        }
-        if (unitInput && opt && opt.dataset && opt.dataset.unit) {
-          unitInput.value = opt.dataset.unit;
-        }
-        if (reorderInput && (reorderInput.value === '' || parseNum(reorderInput.value) <= 0)) {
-          reorderInput.value = meta.reorder.toFixed(2);
-        }
-        if (suggestedInput) {
-          suggestedInput.dataset.manual = '0';
-        }
-        updateSuggestion(true);
-      });
     }
 
     if (ingredientNameInput) {
       ingredientNameInput.addEventListener('input', function () {
-        if (!ingredientSelect) {
+        const opt = findIngredientOptionByName(ingredientNameInput.value || '');
+        if (!opt) {
           return;
         }
-        const typed = (ingredientNameInput.value || '').trim().toLowerCase();
-        if (typed === '') {
-          ingredientSelect.value = '';
-          return;
+        if (unitInput && opt.dataset && opt.dataset.unit && unitInput.value.trim() === '') {
+          unitInput.value = opt.dataset.unit;
         }
-        let matched = false;
-        for (let i = 0; i < ingredientSelect.options.length; i++) {
-          const opt = ingredientSelect.options[i];
-          const optName = ((opt.dataset && opt.dataset.name) ? opt.dataset.name : opt.text || '').trim().toLowerCase();
-          if (optName === typed) {
-            ingredientSelect.value = opt.value;
-            if (unitInput && opt.dataset && opt.dataset.unit) {
-              unitInput.value = opt.dataset.unit;
-            }
-            matched = true;
-            break;
-          }
+        if (reorderInput && (reorderInput.value === '' || parseNum(reorderInput.value) <= 0) && opt.dataset && opt.dataset.reorder) {
+          reorderInput.value = parseNum(opt.dataset.reorder).toFixed(2);
         }
-        if (!matched) {
-          ingredientSelect.value = '';
+        if (suggestedInput) {
+          suggestedInput.dataset.manual = '0';
         }
-      });
-    }
-
-    if (observedInput) {
-      observedInput.addEventListener('input', function () {
         updateSuggestion(false);
       });
     }

@@ -35,7 +35,7 @@ $backup_text = "Daily backups are handled at server level. Suggested policy:\n- 
 </nav>
 <div class="container">
     <div class="card">
-        <h3>🛡️ User and Role Audit</h3>
+        <h3>User and Role Audit</h3>
         <div class="table-responsive">
             <table class="data-table">
                 <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th></tr></thead>
@@ -49,7 +49,7 @@ $backup_text = "Daily backups are handled at server level. Suggested policy:\n- 
     </div>
 
     <div class="card" style="margin-top:16px;">
-        <h3>📦 Recent System Activity</h3>
+        <h3>Recent System Activity</h3>
         <div class="table-responsive">
             <table class="data-table">
                 <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Ingredient</th><th>Qty</th></tr></thead>
@@ -69,7 +69,7 @@ $backup_text = "Daily backups are handled at server level. Suggested policy:\n- 
     </div>
 
     <div class="card" style="margin-top:16px;">
-        <h3>💾 Backup Policy Note</h3>
+        <h3>Backup Policy Note</h3>
         <pre style="white-space:pre-wrap;margin:0;"><?php echo htmlspecialchars($backup_text); ?></pre>
         <div style="margin-top:12px;">
             <a href="backup.php" class="action-btn">Open Backup Center</a>

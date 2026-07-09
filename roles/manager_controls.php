@@ -232,7 +232,7 @@ $menu_items = $conn->query('SELECT id, name, category, selling_price, is_availab
     </div>
 
     <div class="card">
-        <h3>⚙️ Threshold Management</h3>
+        <h3>Threshold Management</h3>
         <?php if ($message): ?><p class="success"><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
         <div class="table-responsive">
             <table class="data-table">

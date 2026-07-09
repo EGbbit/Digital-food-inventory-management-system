@@ -36,10 +36,18 @@ $low_stock = $conn->query("SELECT COUNT(*) AS c FROM ingredients WHERE current_s
 $preparing_orders = (int)$conn->query("SELECT COUNT(*) AS c FROM orders WHERE status = 'preparing'")->fetch_assoc()['c'];
 $new_order_alerts = (int)$conn->query("SELECT COUNT(*) AS c FROM order_alerts WHERE alert_status = 'new'")->fetch_assoc()['c'];
 
-$kitchen_flow_orders = $conn->query("SELECT order_number, table_number, status, created_at
-    FROM orders
-    WHERE status = 'preparing'
-    ORDER BY created_at DESC
+$kitchen_flow_orders = $conn->query("SELECT
+    o.order_number,
+    o.table_number,
+    o.status,
+    o.created_at,
+    IFNULL(GROUP_CONCAT(CONCAT(mi.name, ' x', oi.quantity) ORDER BY mi.name SEPARATOR ', '), 'No items') AS items_summary
+    FROM orders o
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN menu_items mi ON mi.id = oi.menu_item_id
+    WHERE o.status = 'preparing'
+    GROUP BY o.id, o.order_number, o.table_number, o.status, o.created_at
+    ORDER BY o.created_at DESC
     LIMIT 6");
 
 $top_items = $conn->query("SELECT mi.name, SUM(oi.quantity) AS qty
@@ -255,19 +263,20 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
                 <p>Preparing: <strong><?php echo $preparing_orders; ?></strong> | New Order Alerts: <strong><?php echo $new_order_alerts; ?></strong></p>
                 <div class="table-responsive" style="margin-top:10px;">
                     <table class="data-table">
-                        <thead><tr><th>Order</th><th>Table</th><th>Status</th><th>Created</th></tr></thead>
+                        <thead><tr><th>Order</th><th>Table</th><th>Items</th><th>Status</th><th>Created</th></tr></thead>
                         <tbody>
                         <?php if ($kitchen_flow_orders && $kitchen_flow_orders->num_rows > 0): ?>
                             <?php while($ko = $kitchen_flow_orders->fetch_assoc()): ?>
                                 <tr>
                                     <td><?php echo htmlspecialchars((string)$ko['order_number']); ?></td>
                                     <td><?php echo htmlspecialchars((string)$ko['table_number']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$ko['items_summary']); ?></td>
                                     <td><?php echo htmlspecialchars((string)$ko['status']); ?></td>
                                     <td><?php echo date('Y-m-d H:i', strtotime((string)$ko['created_at'])); ?></td>
                                 </tr>
                             <?php endwhile; ?>
                         <?php else: ?>
-                            <tr><td colspan="4">No preparing kitchen orders.</td></tr>
+                            <tr><td colspan="5">No preparing kitchen orders.</td></tr>
                         <?php endif; ?>
                         </tbody>
                     </table>

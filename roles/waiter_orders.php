@@ -199,7 +199,7 @@ $orders = $conn->query("SELECT
 </nav>
 <div class="container">
     <div class="card">
-        <h3>🧾 Record New Order</h3>
+        <h3>Record New Order</h3>
         <?php if ($message): ?><p class="success"><?php echo htmlspecialchars($message); ?></p><?php endif; ?>
         <?php if ($error): ?><p class="error"><?php echo htmlspecialchars($error); ?></p><?php endif; ?>
         <p style="margin-bottom:10px;color:#555;">Available menu items: <strong><?php echo $available_menu_count; ?></strong></p>

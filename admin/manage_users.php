@@ -147,7 +147,7 @@ $users = $conn->query("SELECT id, name, email, role, phone, is_active, created_a
 <nav class="admin-nav"><ul class="admin-nav-links"><li><a href="admin_dashboard.php">Dashboard</a></li><li><a href="manage_users.php" class="active">Manage Users</a></li><li><a href="system_audit.php">System Audit</a></li></ul></nav>
 <div class="container">
     <div class="card">
-        <h3>➕ Add User</h3>
+        <h3>Add User</h3>
         <?php if ($message): ?>
             <p class="<?php echo $isError ? 'error' : 'success'; ?>"><?php echo htmlspecialchars($message); ?></p>
         <?php endif; ?>
@@ -164,7 +164,7 @@ $users = $conn->query("SELECT id, name, email, role, phone, is_active, created_a
         </form>
     </div>
     <div class="card" style="margin-top:16px;">
-        <h3>👥 User Directory</h3>
+        <h3>User Directory</h3>
         <p style="margin-bottom:10px;color:#555;">Use Update to edit user profile, role, status, or reset password. Delete removes user permanently when not referenced by existing records.</p>
         <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;">
