@@ -32,7 +32,18 @@ $conn->query("CREATE TABLE IF NOT EXISTS order_alerts (
 $total_orders = $conn->query("SELECT COUNT(*) AS c FROM orders")->fetch_assoc()['c'];
 $served_orders = $conn->query("SELECT COUNT(*) AS c FROM orders WHERE status='served'")->fetch_assoc()['c'];
 $total_wastage = $conn->query("SELECT IFNULL(SUM(quantity),0) AS total FROM wastage_logs")->fetch_assoc()['total'];
-$low_stock = $conn->query("SELECT COUNT(*) AS c FROM ingredients WHERE current_stock <= reorder_level")->fetch_assoc()['c'];
+$low_stock = $conn->query("SELECT COUNT(*) AS c
+    FROM ingredients i
+    LEFT JOIN (
+        SELECT csn.ingredient_id, csn.observed_stock
+        FROM chef_stock_notes csn
+        INNER JOIN (
+            SELECT ingredient_id, MAX(id) AS latest_id
+            FROM chef_stock_notes
+            GROUP BY ingredient_id
+        ) latest_note ON latest_note.latest_id = csn.id
+    ) latest_chef_stock ON latest_chef_stock.ingredient_id = i.id
+    WHERE COALESCE(latest_chef_stock.observed_stock, i.current_stock) <= i.reorder_level")->fetch_assoc()['c'];
 $preparing_orders = (int)$conn->query("SELECT COUNT(*) AS c FROM orders WHERE status = 'preparing'")->fetch_assoc()['c'];
 $new_order_alerts = (int)$conn->query("SELECT COUNT(*) AS c FROM order_alerts WHERE alert_status = 'new'")->fetch_assoc()['c'];
 
@@ -57,10 +68,23 @@ $top_items = $conn->query("SELECT mi.name, SUM(oi.quantity) AS qty
     ORDER BY qty DESC
     LIMIT 5");
 
-$low_items = $conn->query("SELECT name, current_stock, reorder_level, unit
-    FROM ingredients
-    WHERE current_stock <= reorder_level
-    ORDER BY (current_stock - reorder_level) ASC
+$low_items = $conn->query("SELECT
+    i.name,
+    COALESCE(latest_chef_stock.observed_stock, i.current_stock) AS effective_stock,
+    i.reorder_level,
+    i.unit
+    FROM ingredients i
+    LEFT JOIN (
+        SELECT csn.ingredient_id, csn.observed_stock
+        FROM chef_stock_notes csn
+        INNER JOIN (
+            SELECT ingredient_id, MAX(id) AS latest_id
+            FROM chef_stock_notes
+            GROUP BY ingredient_id
+        ) latest_note ON latest_note.latest_id = csn.id
+    ) latest_chef_stock ON latest_chef_stock.ingredient_id = i.id
+    WHERE COALESCE(latest_chef_stock.observed_stock, i.current_stock) <= i.reorder_level
+    ORDER BY (COALESCE(latest_chef_stock.observed_stock, i.current_stock) - i.reorder_level) ASC
     LIMIT 8");
 
 $conn->query("CREATE TABLE IF NOT EXISTS unavailable_item_requests (
@@ -115,15 +139,6 @@ $unavailable_demands = $conn->query("SELECT id, item_query, request_count, last_
     ORDER BY request_count DESC, item_query ASC
     LIMIT 8");
 
-$conn->query("CREATE TABLE IF NOT EXISTS predictive_reports (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    report_month DATE NOT NULL UNIQUE,
-    report_label VARCHAR(40) NOT NULL,
-    report_body TEXT NOT NULL,
-    generation_mode ENUM('auto', 'manual') NOT NULL DEFAULT 'manual',
-    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-)");
-
 $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     ingredient_id INT NOT NULL,
@@ -146,14 +161,6 @@ $conn->query("CREATE TABLE IF NOT EXISTS chef_stock_notes (
     FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL
 )");
 
-$latestPredictive = null;
-$latestPredictiveRs = $conn->query("SELECT report_label, report_body, generation_mode, generated_at
-    FROM predictive_reports
-    ORDER BY generated_at DESC
-    LIMIT 1");
-if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
-    $latestPredictive = $latestPredictiveRs->fetch_assoc();
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -230,8 +237,7 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
                             <li class="order-item">
                                 <div class="item-primary"><?php echo htmlspecialchars($ingredient['name']); ?></div>
                                 <div class="order-details">
-                                    Stock <?php echo number_format((float)$ingredient['current_stock'], 2); ?> <?php echo htmlspecialchars($ingredient['unit']); ?>
-                                    / Reorder <?php echo number_format((float)$ingredient['reorder_level'], 2); ?>
+                                    Stock <?php echo number_format((float)$ingredient['effective_stock'], 2); ?> <?php echo htmlspecialchars($ingredient['unit']); ?>
                                 </div>
                             </li>
                         <?php endwhile; ?>
@@ -242,20 +248,13 @@ if ($latestPredictiveRs && $latestPredictiveRs->num_rows > 0) {
             </div>
 
             <div class="card">
-                <h3> Predictive Report Snapshot</h3>
-                <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <h3> Manager Quick Actions</h3>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
                     <a href="manager_controls.php" class="btn btn-primary">Open Report Controls</a>
                     <a href="open_menu.php" class="btn btn-primary">Open Food Menu</a>
                     <a href="manager_reports.php" class="btn btn-success">Open Reports & Graphs</a>
                     <a href="manager_controls.php#menu-management" class="btn btn-warning">Go to Menu Controls</a>
                 </div>
-                <?php if ($latestPredictive): ?>
-                    <p><strong><?php echo htmlspecialchars((string)$latestPredictive['report_label']); ?></strong> (<?php echo htmlspecialchars((string)$latestPredictive['generation_mode']); ?>)</p>
-                    <p style="color:#666;font-size:13px;">Generated: <?php echo date('Y-m-d H:i', strtotime((string)$latestPredictive['generated_at'])); ?></p>
-                    <pre style="white-space:pre-wrap;background:#fafafa;border:1px solid #eee;padding:10px;border-radius:8px;margin-top:8px;"><?php echo htmlspecialchars((string)$latestPredictive['report_body']); ?></pre>
-                <?php else: ?>
-                    <p>No predictive report generated yet. Open Report Controls and click Generate Report.</p>
-                <?php endif; ?>
             </div>
 
             <div class="card">

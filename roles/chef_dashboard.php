@@ -300,12 +300,33 @@ $recent_stock_notes = $conn->query("SELECT
   n.suggested_restock_amount,
   n.expected_expiry_date,
   n.shelf_life_days,
+  COALESCE(
+    n.expected_expiry_date,
+    CASE
+      WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+      ELSE NULL
+    END
+  ) AS effective_expiry_date,
+  CASE
+    WHEN n.expected_expiry_date IS NOT NULL THEN 'expected_date'
+    WHEN n.shelf_life_days IS NOT NULL THEN 'shelf_life_from_note_date'
+    ELSE 'none'
+  END AS expiry_basis,
   n.urgency,
   n.comment,
   n.created_at,
   n.is_acknowledged,
   n.acknowledged_at,
-  DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
+  DATEDIFF(
+    COALESCE(
+      n.expected_expiry_date,
+      CASE
+        WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+        ELSE NULL
+      END
+    ),
+    CURDATE()
+  ) AS days_to_expiry
   FROM chef_stock_notes n
   JOIN ingredients i ON i.id = n.ingredient_id
   LEFT JOIN users ack ON ack.id = n.acknowledged_by
@@ -941,7 +962,6 @@ $recent_stock_notes = $conn->query("SELECT
             <?php mysqli_data_seek($stock_note_ingredients, 0); ?>
           <?php endif; ?>
         </datalist>
-        <input id="reorder-snapshot" type="hidden" name="reorder_level_snapshot" value="0">
         <input id="ingredient-unit" type="text" name="ingredient_unit" placeholder="Unit (e.g. kg, liters, pcs)">
         <input id="suggested-restock" type="number" step="0.01" min="0" name="suggested_restock_amount" placeholder="Suggested amount">
         <select name="urgency" required>
@@ -961,15 +981,23 @@ $recent_stock_notes = $conn->query("SELECT
             <?php
               $urgencyLabel = strtoupper((string)$note['urgency']);
               $daysToExpiry = $note['days_to_expiry'];
-              $expiryText = 'No expiry date';
-              if ($note['expected_expiry_date']) {
+              $expiryText = 'No expiry data';
+              if (!empty($note['effective_expiry_date']) && $daysToExpiry !== null) {
                 if ($daysToExpiry !== null && (int)$daysToExpiry < 0) {
                   $expiryText = 'Expired ' . abs((int)$daysToExpiry) . ' day(s) ago';
                 } elseif ($daysToExpiry !== null) {
                   $expiryText = 'Expires in ' . (int)$daysToExpiry . ' day(s)';
                 } else {
-                  $expiryText = 'Expiry: ' . htmlspecialchars((string)$note['expected_expiry_date']);
+                  $expiryText = 'Expiry: ' . htmlspecialchars((string)$note['effective_expiry_date']);
                 }
+              }
+              if (!empty($note['shelf_life_days'])) {
+                $expiryText .= ' | Shelf-life ' . (int)$note['shelf_life_days'] . ' day(s)';
+              }
+              if (($note['expiry_basis'] ?? '') === 'shelf_life_from_note_date') {
+                $expiryText .= ' | Computed from note date';
+              } elseif (($note['expiry_basis'] ?? '') === 'expected_date') {
+                $expiryText .= ' | From expected expiry date';
               }
             ?>
             <div class="stock-note-entry">
@@ -979,7 +1007,6 @@ $recent_stock_notes = $conn->query("SELECT
               </div>
               <div class="stock-note-entry__metrics">
                 Stock <?= number_format((float)$note['observed_stock'], 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
-                Reorder <?= number_format((float)$note['reorder_level_snapshot'], 2) ?> |
                 Suggested restock <?= number_format((float)($note['suggested_restock_amount'] ?? 0), 2) ?> <?= htmlspecialchars((string)$note['unit']) ?> |
                 <?= $expiryText ?>
               </div>
@@ -1106,17 +1133,11 @@ $recent_stock_notes = $conn->query("SELECT
     const ingredientNameInput = document.getElementById('stock-note-ingredient-name');
     const ingredientDatalist = document.getElementById('stock-note-ingredient-list');
     const unitInput = document.getElementById('ingredient-unit');
-    const reorderInput = document.getElementById('reorder-snapshot');
     const suggestedInput = document.getElementById('suggested-restock');
 
     function parseNum(value) {
       const n = parseFloat(value || '0');
       return Number.isFinite(n) ? n : 0;
-    }
-
-    function selectedMeta() {
-      const unit = unitInput && unitInput.value.trim() !== '' ? unitInput.value.trim() : 'units';
-      return { unit, reorder: parseNum(reorderInput ? reorderInput.value : '0') };
     }
 
     function findIngredientOptionByName(name) {
@@ -1137,13 +1158,13 @@ $recent_stock_notes = $conn->query("SELECT
     }
 
     function updateSuggestion(force) {
-      if (!suggestedInput || !reorderInput) {
+      if (!suggestedInput) {
         return;
       }
 
-      const meta = selectedMeta();
+      const opt = ingredientNameInput ? findIngredientOptionByName(ingredientNameInput.value || '') : null;
       const observed = 0;
-      const reorder = parseNum(reorderInput.value);
+      const reorder = (opt && opt.dataset && opt.dataset.reorder) ? parseNum(opt.dataset.reorder) : 0;
       const suggestion = Math.max(0, reorder - observed);
 
       if (force || suggestedInput.dataset.manual !== '1') {
@@ -1161,18 +1182,9 @@ $recent_stock_notes = $conn->query("SELECT
         if (unitInput && opt.dataset && opt.dataset.unit && unitInput.value.trim() === '') {
           unitInput.value = opt.dataset.unit;
         }
-        if (reorderInput && (reorderInput.value === '' || parseNum(reorderInput.value) <= 0) && opt.dataset && opt.dataset.reorder) {
-          reorderInput.value = parseNum(opt.dataset.reorder).toFixed(2);
-        }
         if (suggestedInput) {
           suggestedInput.dataset.manual = '0';
         }
-        updateSuggestion(false);
-      });
-    }
-
-    if (reorderInput) {
-      reorderInput.addEventListener('input', function () {
         updateSuggestion(false);
       });
     }

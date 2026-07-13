@@ -145,6 +145,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_predictive_r
         i.name AS ingredient_name,
         n.expected_expiry_date,
         n.shelf_life_days,
+        COALESCE(
+            n.expected_expiry_date,
+            CASE
+                WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                ELSE NULL
+            END
+        ) AS effective_expiry_date,
+        DATEDIFF(
+            COALESCE(
+                n.expected_expiry_date,
+                CASE
+                    WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                    ELSE NULL
+                END
+            ),
+            CURDATE()
+        ) AS days_to_expiry,
         n.urgency,
         n.observed_stock,
         n.reorder_level_snapshot,
@@ -155,16 +172,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_predictive_r
         JOIN ingredients i ON i.id = n.ingredient_id
         WHERE n.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
           AND (
-                (n.expected_expiry_date IS NOT NULL AND n.expected_expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY))
+                (
+                    COALESCE(
+                        n.expected_expiry_date,
+                        CASE
+                            WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                            ELSE NULL
+                        END
+                    ) IS NOT NULL
+                    AND COALESCE(
+                        n.expected_expiry_date,
+                        CASE
+                            WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                            ELSE NULL
+                        END
+                    ) <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+                )
                 OR n.urgency = 'urgent'
               )
         ORDER BY
           CASE
-            WHEN n.expected_expiry_date IS NULL THEN 2
-            WHEN n.expected_expiry_date < CURDATE() THEN 0
+            WHEN COALESCE(
+                n.expected_expiry_date,
+                CASE
+                    WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                    ELSE NULL
+                END
+            ) IS NULL THEN 2
+            WHEN COALESCE(
+                n.expected_expiry_date,
+                CASE
+                    WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                    ELSE NULL
+                END
+            ) < CURDATE() THEN 0
             ELSE 1
           END,
-          n.expected_expiry_date ASC,
+          COALESCE(
+            n.expected_expiry_date,
+            CASE
+                WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                ELSE NULL
+            END
+          ) ASC,
           n.created_at DESC
         LIMIT 10");
 
@@ -176,7 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_predictive_r
             while ($row = $expiryRs->fetch_assoc()) {
                 $ingredientId = (int)$row['ingredient_id'];
                 $ingredientName = (string)$row['ingredient_name'];
-                $expiryDate = $row['expected_expiry_date'];
+                $effectiveExpiryDate = $row['effective_expiry_date'];
                 $urgency = strtoupper((string)$row['urgency']);
                 $observed = number_format((float)$row['observed_stock'], 2);
                 $reorder = number_format((float)$row['reorder_level_snapshot'], 2);
@@ -187,14 +237,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_predictive_r
                 }
 
                 $expiryText = 'No expiry date provided';
-                if (!empty($expiryDate)) {
-                    $days = (int)floor((strtotime((string)$expiryDate) - strtotime(date('Y-m-d'))) / 86400);
+                if ($row['days_to_expiry'] !== null && !empty($effectiveExpiryDate)) {
+                    $days = (int)$row['days_to_expiry'];
                     if ($days < 0) {
                         $expiryText = 'Expired ' . abs($days) . ' day(s) ago';
                     } elseif ($days === 0) {
                         $expiryText = 'Expires today';
                     } else {
                         $expiryText = 'Expires in ' . $days . ' day(s)';
+                    }
+                    if (empty($row['expected_expiry_date']) && !empty($row['shelf_life_days'])) {
+                        $expiryText .= ' (computed from shelf life)';
                     }
                 }
 
@@ -279,10 +332,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_ingredient_quick'
     $ingredientName = trim((string)($_POST['ingredient_name'] ?? ''));
     $ingredientUnit = trim((string)($_POST['ingredient_unit'] ?? ''));
     $ingredientAddAmount = (float)($_POST['ingredient_add_amount'] ?? 0);
-    $ingredientReorder = (float)($_POST['ingredient_reorder'] ?? 0);
 
-    if ($ingredientName === '' || $ingredientAddAmount <= 0 || $ingredientReorder < 0) {
-        $report_message = 'Please provide ingredient name, amount to add, and a valid reorder level.';
+    if ($ingredientName === '' || $ingredientAddAmount <= 0) {
+        $report_message = 'Please provide ingredient name and amount to add.';
     } else {
         $dupStmt = $conn->prepare('SELECT id, unit FROM ingredients WHERE LOWER(name) = LOWER(?) LIMIT 1');
         if ($dupStmt) {
@@ -293,9 +345,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_ingredient_quick'
 
             if ($exists) {
                 $ingredientId = (int)$exists['id'];
-                $updateStmt = $conn->prepare('UPDATE ingredients SET current_stock = current_stock + ?, reorder_level = ? WHERE id = ?');
+                $updateStmt = $conn->prepare('UPDATE ingredients SET current_stock = current_stock + ? WHERE id = ?');
                 if ($updateStmt) {
-                    $updateStmt->bind_param('ddi', $ingredientAddAmount, $ingredientReorder, $ingredientId);
+                    $updateStmt->bind_param('di', $ingredientAddAmount, $ingredientId);
                     if ($updateStmt->execute()) {
                         $report_message = 'Ingredient stock updated from chef-note quick actions.';
                     } else {
@@ -310,6 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_ingredient_quick'
                     $addStmt = $conn->prepare('INSERT INTO ingredients (name, category, unit, current_stock, reorder_level, unit_cost, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)');
                     if ($addStmt) {
                         $ingredientCategory = 'General';
+                        $ingredientReorder = 0;
                         $ingredientCost = 0.00;
                         $ingredientActive = 1;
                         $addStmt->bind_param('sssdddi', $ingredientName, $ingredientCategory, $ingredientUnit, $ingredientAddAmount, $ingredientReorder, $ingredientCost, $ingredientActive);
@@ -452,12 +505,33 @@ $chefNotesRs = $conn->query("SELECT
     n.suggested_restock_amount,
     n.expected_expiry_date,
     n.shelf_life_days,
+    COALESCE(
+        n.expected_expiry_date,
+        CASE
+            WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+            ELSE NULL
+        END
+    ) AS effective_expiry_date,
+    CASE
+        WHEN n.expected_expiry_date IS NOT NULL THEN 'expected_date'
+        WHEN n.shelf_life_days IS NOT NULL THEN 'shelf_life_from_note_date'
+        ELSE 'none'
+    END AS expiry_basis,
     n.urgency,
     n.comment,
     n.is_acknowledged,
     n.acknowledged_at,
     n.created_at,
-    DATEDIFF(n.expected_expiry_date, CURDATE()) AS days_to_expiry
+    DATEDIFF(
+        COALESCE(
+            n.expected_expiry_date,
+            CASE
+                WHEN n.shelf_life_days IS NOT NULL THEN DATE_ADD(DATE(n.created_at), INTERVAL n.shelf_life_days DAY)
+                ELSE NULL
+            END
+        ),
+        CURDATE()
+    ) AS days_to_expiry
     FROM chef_stock_notes n
     JOIN ingredients i ON i.id = n.ingredient_id
     JOIN users u ON u.id = n.chef_id
@@ -554,12 +628,13 @@ if (isset($_GET['export'])) {
                 $row['ingredient_name'],
                 $row['chef_name'],
                 number_format((float)$row['observed_stock'], 2, '.', ''),
-                number_format((float)$row['reorder_level_snapshot'], 2, '.', ''),
                 number_format((float)($row['suggested_restock_amount'] ?? 0), 2, '.', ''),
                 $row['unit'],
                 (string)$row['urgency'],
                 ($row['expected_expiry_date'] ?? ''),
                 ($row['shelf_life_days'] ?? ''),
+                ($row['effective_expiry_date'] ?? ''),
+                ($row['expiry_basis'] ?? ''),
                 ($row['days_to_expiry'] ?? ''),
                 ((int)$row['is_acknowledged'] === 1 ? 'acknowledged' : 'pending'),
                 ($row['ack_manager_name'] ?? ''),
@@ -568,7 +643,7 @@ if (isset($_GET['export'])) {
                 date('Y-m-d H:i', strtotime((string)$row['created_at']))
             ];
         }
-        output_csv('manager_chef_stock_notes_' . $stamp . '.csv', ['Ingredient', 'Chef', 'Observed Stock', 'Reorder Snapshot', 'Suggested Restock', 'Unit', 'Urgency', 'Expected Expiry', 'Shelf Life Days', 'Days To Expiry', 'Review Status', 'Acknowledged By', 'Acknowledged At', 'Comment', 'Created At'], $rows);
+        output_csv('manager_chef_stock_notes_' . $stamp . '.csv', ['Ingredient', 'Chef', 'Observed Stock', 'Suggested Restock', 'Unit', 'Urgency', 'Expected Expiry', 'Shelf Life Days', 'Effective Expiry Date', 'Expiry Basis', 'Days To Expiry', 'Review Status', 'Acknowledged By', 'Acknowledged At', 'Comment', 'Created At'], $rows);
     }
 }
 
@@ -720,7 +795,7 @@ $topItemValues = array_map(static function ($row) {
             <div style="display:grid;grid-template-columns:repeat(2,minmax(280px,1fr));gap:12px;margin-bottom:14px;">
                 <div style="background:#f7fbff;border:1px solid #dce9f7;border-radius:10px;padding:10px;">
                     <h4 style="margin:0 0 8px 0;color:#2f646e;">Quick Add Ingredient</h4>
-                    <p style="margin:0 0 8px 0;font-size:12px;color:#4f5f69;">Enter ingredient and amount to add. Reorder level and unit auto-reflect from chef notes when available.</p>
+                    <p style="margin:0 0 8px 0;font-size:12px;color:#4f5f69;">Enter ingredient and amount to add. Unit auto-reflects from chef notes when available.</p>
                     <form method="POST" style="display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;align-items:end;">
                         <input id="quick-ingredient-name" type="text" name="ingredient_name" placeholder="Ingredient name" list="chef-ingredient-hints" required>
                         <datalist id="chef-ingredient-hints">
@@ -729,7 +804,6 @@ $topItemValues = array_map(static function ($row) {
                             <?php endforeach; ?>
                         </datalist>
                         <input id="quick-ingredient-amount" type="number" step="0.01" min="0.01" name="ingredient_add_amount" placeholder="Amount to add" required>
-                        <input id="quick-ingredient-reorder" type="number" step="0.01" min="0" name="ingredient_reorder" placeholder="Reorder level (auto from chef note)" required>
                         <input id="quick-ingredient-unit" type="text" name="ingredient_unit" placeholder="Unit (auto from chef note)" required>
                         <button type="submit" name="add_ingredient_quick" class="btn btn-success">Add Ingredient</button>
                     </form>
@@ -750,23 +824,28 @@ $topItemValues = array_map(static function ($row) {
             <?php if (count($chefNotesRows) > 0): ?>
                 <div class="table-responsive">
                     <table class="data-table">
-                        <thead><tr><th>Time</th><th>Ingredient</th><th>Chef</th><th>Observed</th><th>Reorder Snapshot</th><th>Suggested Restock</th><th>Urgency</th><th>Shelf-Life</th><th>Comment</th><th>Review</th><th>Action</th></tr></thead>
+                        <thead><tr><th>Time</th><th>Ingredient</th><th>Chef</th><th>Observed</th><th>Suggested Restock</th><th>Urgency</th><th>Shelf-Life</th><th>Comment</th><th>Review</th><th>Action</th></tr></thead>
                         <tbody>
                         <?php foreach ($chefNotesRows as $row): ?>
                             <?php
                                 $daysToExpiry = $row['days_to_expiry'];
-                                $shelfLifeText = 'No expiry date';
-                                if (!empty($row['expected_expiry_date'])) {
+                                $shelfLifeText = 'No expiry data';
+                                if (!empty($row['effective_expiry_date']) && $daysToExpiry !== null) {
                                     if ($daysToExpiry !== null && (int)$daysToExpiry < 0) {
                                         $shelfLifeText = 'Expired ' . abs((int)$daysToExpiry) . ' day(s) ago';
                                     } elseif ($daysToExpiry !== null) {
                                         $shelfLifeText = 'Expires in ' . (int)$daysToExpiry . ' day(s)';
                                     } else {
-                                        $shelfLifeText = (string)$row['expected_expiry_date'];
+                                        $shelfLifeText = (string)$row['effective_expiry_date'];
                                     }
                                 }
                                 if (!empty($row['shelf_life_days'])) {
                                     $shelfLifeText .= ' | Shelf-life ' . (int)$row['shelf_life_days'] . ' day(s)';
+                                }
+                                if (($row['expiry_basis'] ?? '') === 'shelf_life_from_note_date') {
+                                    $shelfLifeText .= ' | Computed from note date';
+                                } elseif (($row['expiry_basis'] ?? '') === 'expected_date') {
+                                    $shelfLifeText .= ' | From expected expiry date';
                                 }
                             ?>
                             <tr>
@@ -774,7 +853,6 @@ $topItemValues = array_map(static function ($row) {
                                 <td><?php echo htmlspecialchars((string)$row['ingredient_name']); ?></td>
                                 <td><?php echo htmlspecialchars((string)$row['chef_name']); ?></td>
                                 <td><?php echo number_format((float)$row['observed_stock'], 2); ?> <?php echo htmlspecialchars((string)$row['unit']); ?></td>
-                                <td><?php echo number_format((float)$row['reorder_level_snapshot'], 2); ?></td>
                                 <td><?php echo number_format((float)($row['suggested_restock_amount'] ?? 0), 2); ?> <?php echo htmlspecialchars((string)$row['unit']); ?></td>
                                 <td><?php echo htmlspecialchars(strtoupper((string)$row['urgency'])); ?></td>
                                 <td><?php echo htmlspecialchars($shelfLifeText); ?></td>
@@ -892,10 +970,9 @@ $topItemValues = array_map(static function ($row) {
         (function () {
             const ingredientNameInput = document.getElementById('quick-ingredient-name');
             const amountInput = document.getElementById('quick-ingredient-amount');
-            const reorderInput = document.getElementById('quick-ingredient-reorder');
             const unitInput = document.getElementById('quick-ingredient-unit');
 
-            if (!ingredientNameInput || !reorderInput || !unitInput) {
+            if (!ingredientNameInput || !unitInput) {
                 return;
             }
 
@@ -910,9 +987,6 @@ $topItemValues = array_map(static function ($row) {
                 }
 
                 const hint = chefIngredientHints[key];
-                if (reorderInput && Number(hint.reorder || 0) >= 0) {
-                    reorderInput.value = Number(hint.reorder || 0).toFixed(2);
-                }
                 if (unitInput && hint.unit) {
                     unitInput.value = String(hint.unit);
                 }

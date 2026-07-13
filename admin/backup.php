@@ -112,9 +112,11 @@ if (isset($_GET['download']) && $_GET['download'] !== '') {
     $filePath = $backupDir . DIRECTORY_SEPARATOR . $fileName;
 
     if (is_file($filePath)) {
-        header('Content-Type: application/sql');
+        header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         header('Content-Length: ' . filesize($filePath));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         readfile($filePath);
         exit();
     }
@@ -143,9 +145,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fileName = 'food_inventory_backup_' . $stamp . '.sql';
         $sqlBody = generate_sql_backup($conn);
 
-        header('Content-Type: application/sql');
+        header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         header('Content-Length: ' . strlen($sqlBody));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         echo $sqlBody;
         exit();
     } elseif ($action === 'save_users_backup') {
@@ -166,9 +170,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fileName = 'food_inventory_users_backup_' . $stamp . '.sql';
         $sqlBody = generate_users_backup($conn);
 
-        header('Content-Type: application/sql');
+        header('Content-Type: application/octet-stream');
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
         header('Content-Length: ' . strlen($sqlBody));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
         echo $sqlBody;
         exit();
     }
