@@ -16,7 +16,7 @@ function require_role(string $role): void
     require_login();
     if (!isset($_SESSION['role']) || $_SESSION['role'] !== $role) {
         if (isset($_SESSION['role'])) {
-            redirect_by_role((string)$_SESSION['role']);
+            redirect_by_role((string)$_SESSION['role'], 'Role mismatch: access restricted to your assigned dashboard.');
         }
         header('Location: ../auth/login.php');
         exit();
@@ -36,8 +36,10 @@ function redirect_by_role(string $role, string $message = ''): void
         header('Location: ../roles/manager_dashboard.php' . $suffix);
     } elseif ($role === 'waiter') {
         header('Location: ../roles/waiter_dashboard.php' . $suffix);
-    } else {
+    } elseif ($role === 'chef') {
         header('Location: ../roles/chef_dashboard.php' . $suffix);
+    } else {
+        header('Location: ../auth/login.php?msg=' . rawurlencode('Session role invalid. Please log in again.'));
     }
     exit();
 }
